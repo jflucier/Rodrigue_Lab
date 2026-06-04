@@ -1,20 +1,31 @@
 import json
 import os
+import argparse
 
 
-def prepare_contact_perfect_motif(pdb_name):
-    pdb_path = f"motifs/{pdb_name}.pdb"
-    if not os.path.exists(pdb_path):
-        print(f"Error: {pdb_path} not found.")
+def main():
+    # Set up command line argument parsing
+    parser = argparse.ArgumentParser(description="Inject Switchcraft motif_spec headers into a PDB file safely.")
+    parser.add_argument("-i", "--input", required=True, help="Path to the original source PDB file")
+    parser.add_argument("-o", "--output", required=True, help="Path where the new annotated PDB file should be saved")
+    args = parser.parse_args()
+
+    if not os.path.exists(args.input):
+        print(f"Error: Input file '{args.input}' not found.")
         return
 
-    with open(pdb_path, 'r') as f:
+    # Extract a clean motif name from the output filename
+    base_name = os.path.basename(args.output)
+    motif_name = os.path.splitext(base_name)[0].lower()
+
+    # Read from the raw untouched source file
+    with open(args.input, 'r') as f:
         lines = f.readlines()
 
-    # Clear out any old tracking headers
+    # Clean out any old tracking headers if present
     clean_lines = [l for l in lines if not l.startswith("REMARK    ") or "motif_spec" not in l]
 
-    # Exactly map the four contact clusters for Chain A and Chain B
+    # Map the four precise contact clusters for Chain A and Chain B
     target_chains = ["A", "B"]
     segments = []
 
@@ -27,18 +38,19 @@ def prepare_contact_perfect_motif(pdb_name):
         ])
 
     spec = {
-        "name": pdb_name.lower(),
+        "name": motif_name,
         "segments": segments
     }
 
     header = f"REMARK    motif_spec {json.dumps(spec)}\n"
 
-    with open(pdb_path, 'w') as f:
+    # Write everything to the new specified output path
+    with open(args.output, 'w') as f:
         f.write(header)
         f.writelines(clean_lines)
-    print(f"Successfully injected exact contact segments into {pdb_path}")
+
+    print(f"Success! Annotated motif saved to: {args.output}")
 
 
-# Apply to your templates
-prepare_contact_perfect_motif("4N9H")
-prepare_contact_perfect_motif("2GZW")
+if __name__ == "__main__":
+    main()
