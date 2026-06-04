@@ -3,7 +3,7 @@ import argparse
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Inject complete alternating Switchcraft REMARK 999 headers.")
+    parser = argparse.ArgumentParser(description="Inject valid Switchcraft length-padded REMARK 999 headers.")
     parser.add_argument("-i", "--input", required=True, help="Path to the original source PDB file")
     parser.add_argument("-o", "--output", required=True, help="Path where the new annotated PDB file should be saved")
     args = parser.parse_args()
@@ -24,32 +24,33 @@ def main():
     header_lines = [
         f"REMARK 999 NAME   {motif_name.upper():<4}\n",
         f"REMARK 999 MINIMUM TOTAL LENGTH      200\n",
-        f"REMARK 999 MAXIMUM TOTAL LENGTH      220\n"
+        f"REMARK 999 MAXIMUM TOTAL LENGTH      250\n"
     ]
 
     target_chains = ["A", "B"]
 
     for chain in target_chains:
-        # We explicitly interleave designable 'scaffold' regions (no chain letter)
-        # and frozen 'motif' regions (with chain letter) so the merge code validates End-to-End.
+        # Padded architecture layout:
+        # 'motif' lines pass absolute structural indices (Start_Residue, End_Residue)
+        # 'scaffold' lines pass allowed design lengths (Min_Length, Max_Length)
         architecture = [
-            {"type": "scaffold", "min": 5, "max": 50},  # Pad 1: N-Terminus
-            {"type": "motif", "min": 49, "max": 64},  # Cluster 1: cAMP face
-            {"type": "scaffold", "min": 2, "max": 15},  # Pad 2: Internal loop
-            {"type": "motif", "min": 71, "max": 86},  # Cluster 2: cAMP floor
-            {"type": "scaffold", "min": 10, "max": 45},  # Pad 3: Internal loop
-            {"type": "motif", "min": 123, "max": 136},  # Cluster 3: Hinge link
-            {"type": "scaffold", "min": 10, "max": 40},  # Pad 4: Internal loop
-            {"type": "motif", "min": 169, "max": 191},  # Cluster 4: DNA Horizon
-            {"type": "scaffold", "min": 5, "max": 30}  # Pad 5: C-Terminus (Ensures a trailing scaffold segment!)
+            {"type": "scaffold", "min": 10, "max": 50},  # Pad 1 length: handles residues 1-48
+            {"type": "motif", "min": 49, "max": 64},  # Cluster 1 indices: cAMP face
+            {"type": "scaffold", "min": 2, "max": 10},  # Pad 2 length: handles residues 65-70
+            {"type": "motif", "min": 71, "max": 86},  # Cluster 2 indices: cAMP floor
+            {"type": "scaffold", "min": 10, "max": 40},  # Pad 3 length: handles residues 87-122
+            {"type": "motif", "min": 123, "max": 136},  # Cluster 3 indices: Hinge link
+            {"type": "scaffold", "min": 10, "max": 40},  # Pad 4 length: handles residues 137-168
+            {"type": "motif", "min": 169, "max": 191},  # Cluster 4 indices: DNA Helix
+            {"type": "scaffold", "min": 5, "max": 25}  # Pad 5 length: handles residues 192-210
         ]
 
         for segment in architecture:
             if segment["type"] == "scaffold":
-                # Space character at index 18 forces Switchcraft to see a 'scaffold'
+                # Blank space at index 18 defines a scaffold length parameter range
                 header_lines.append(f"REMARK 999 INPUT   {segment['min']:>4}{segment['max']:>4}\n")
             else:
-                # Chain character at index 18 forces Switchcraft to see a frozen 'motif'
+                # Chain letter at index 18 tracks static structural coordinate boundaries
                 header_lines.append(f"REMARK 999 INPUT  {chain}{segment['min']:>4}{segment['max']:>4}\n")
 
     final_header = "".join(header_lines)
@@ -58,7 +59,7 @@ def main():
         f.write(final_header)
         f.writelines(clean_lines)
 
-    print(f"Success! Properly padded mergeable template saved to: {args.output}")
+    print(f"Success! Correct length-mapped template saved to: {args.output}")
 
 
 if __name__ == "__main__":
