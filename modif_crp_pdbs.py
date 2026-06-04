@@ -4,7 +4,8 @@ import argparse
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Inject valid Switchcraft length-padded REMARK 999 headers and precisely filter atoms.")
+        description="Inject valid Switchcraft length-padded REMARK 999 headers and precisely filter atoms using strict PDB columns."
+    )
     parser.add_argument("-i", "--input", required=True, help="Path to the original source PDB file")
     parser.add_argument("-o", "--output", required=True, help="Path where the new annotated PDB file should be saved")
     args = parser.parse_args()
@@ -54,22 +55,22 @@ def main():
 
     final_header = "".join(header_lines)
 
-    # Filter structural lines robustly
+    # Filter structural lines using standard PDB coordinate fixed-width rules
     motif_atom_lines = []
     motif_ranges = [seg for seg in architecture if seg["type"] == "motif"]
 
     for line in clean_lines:
-        if line.startswith("ATOM  ") or line.startswith("HETATM"):
-            # Split elements by whitespace to avoid rigid column slice errors
-            parts = line.split()
-            if len(parts) < 6:
+        is_atom = line.startswith("ATOM  ")
+        is_hetatm = line.startswith("HETATM")
+
+        if is_atom or is_hetatm:
+            if len(line) < 27:
                 continue
 
-            # Standard PDB layout elements after splitting:
-            # ['ATOM', '342', 'N', 'VAL', 'A', '49', ...]
-            chain_id = parts[4]
+            # Standard PDB Rules: Chain ID is index 21, Residue Seq is indices 22-26
+            chain_id = line[21:22].strip()
             try:
-                res_seq = int(parts[5])
+                res_seq = int(line[22:26].strip())
             except ValueError:
                 continue
 
@@ -80,16 +81,31 @@ def main():
                     for seg in motif_ranges
                 )
                 if is_inside_motif:
-                    motif_atom_lines.append(line)
+                    # Normalize non-standard HETATM amino acids into standard ATOM entries on-the-fly
+                    if is_hetatm:
+                        # Convert line type identifier
+                        line = "ATOM  " + line[6:]
 
-        # Discard all metadata tags completely (TER, END, etc.)
+                        # Normalize Selenomethionine (MSE -> MET)
+                        if "MSE" in line:
+                            line = line[:17] + "MET" + line[20:]
+                            if "SE " in line:
+                                line = line.replace("SE ", "SD ")
+
+                        # Normalize Selenocysteine (SEC -> CYS)
+                        elif "SEC" in line:
+                            line = line[:17] + "CYS" + line[20:]
+                            if "SE " in line:
+                                line = line.replace("SE ", "SG ")
+
+                    motif_atom_lines.append(line)
 
     # Write out the structural file containing headers and properly pruned atoms
     with open(args.output, 'w') as f:
         f.write(final_header)
         f.writelines(motif_atom_lines)
 
-    print(f"Success! Pruned template (All 138 residues captured successfully) saved to: {args.output}")
+    print(f"Success! Normalized template saved to: {args.output}")
 
 
 if __name__ == "__main__":
