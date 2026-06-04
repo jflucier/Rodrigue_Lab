@@ -16,7 +16,8 @@
 #SBATCH --output=dorado_%j.log
 
 ##### how to call:
-#sbatch dorado_basecall.slurm \
+#source /tank/def-rodrigu1/programs/dorado/venv/bin/activate
+#sbatch /net/nfs-bio/home/def-rodrigu1/programs/Rodrigue_Lab/dorado_basecall.slurm \
 #--pod5_dir /net/nfs-bio/home/def-rodrigu1/data/brutes/blob_promethion_13_ap_2026/pod5/ \
 #--out_dir $PWD/blob_promethion_13_ap_2026/
 #
