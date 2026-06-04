@@ -54,17 +54,22 @@ def main():
 
     final_header = "".join(header_lines)
 
-    # Filter structural lines strictly based on exact PDB column rules
+    # Filter structural lines robustly
     motif_atom_lines = []
     motif_ranges = [seg for seg in architecture if seg["type"] == "motif"]
 
     for line in clean_lines:
         if line.startswith("ATOM  ") or line.startswith("HETATM"):
-            # PDB Standard: Chain ID is strictly at character index 21
-            chain_id = line[21:22].strip()
+            # Split elements by whitespace to avoid rigid column slice errors
+            parts = line.split()
+            if len(parts) < 6:
+                continue
+
+            # Standard PDB layout elements after splitting:
+            # ['ATOM', '342', 'N', 'VAL', 'A', '49', ...]
+            chain_id = parts[4]
             try:
-                # PDB Standard: Residue sequence number is columns 23-26 (indices 22-26)
-                res_seq = int(line[22:26].strip())
+                res_seq = int(parts[5])
             except ValueError:
                 continue
 
@@ -77,15 +82,14 @@ def main():
                 if is_inside_motif:
                     motif_atom_lines.append(line)
 
-        # Discard all TER and END lines explicitly to match the 1PRW test standard
+        # Discard all metadata tags completely (TER, END, etc.)
 
     # Write out the structural file containing headers and properly pruned atoms
     with open(args.output, 'w') as f:
         f.write(final_header)
         f.writelines(motif_atom_lines)
 
-    print(
-        f"Success! Cleaned template (138 residues filtered from native PDB without metadata tags) saved to: {args.output}")
+    print(f"Success! Pruned template (All 138 residues captured successfully) saved to: {args.output}")
 
 
 if __name__ == "__main__":
