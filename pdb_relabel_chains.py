@@ -1,7 +1,18 @@
 import os
+import argparse
 
-input_file = "/storage/Documents/service/biologie/rodrigue/analysis/20260602_crp_rnapol/1lb2.complex.pdb"
-output_file = "/storage/Documents/service/biologie/rodrigue/analysis/20260602_crp_rnapol/1lb2.complex.relabelled.pdb"
+# Set up command-line argument parsing
+parser = argparse.ArgumentParser(description="Relabel and normalize PDB chain data.")
+parser.add_init_arguments = parser.add_argument(
+    "-i", "--input", required=True, help="Path to the input PDB file"
+)
+parser.add_argument(
+    "-o", "--output", required=True, help="Path to save the output PDB file"
+)
+args = parser.parse_args()
+
+input_file = args.input
+output_file = args.output
 
 with open(input_file, "r") as f:
     lines = f.readlines()
@@ -49,8 +60,12 @@ for line in lines:
 
             clean_lines.append(line)
 
-os.makedirs("motifs", exist_ok=True)
+# Automatically create the parent directory of the output file if it doesn't exist
+output_dir = os.path.dirname(output_file)
+if output_dir:
+    os.makedirs(output_dir, exist_ok=True)
+
 with open(output_file, "w") as out:
     out.writelines(clean_lines)
 
-print("Success! Fully normalized 4-domain target file saved to: motifs/rpoa_all_4.pdb")
+print(f"Success! Fully normalized 4-domain target file saved to: {output_file}")
