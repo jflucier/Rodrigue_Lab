@@ -32,22 +32,20 @@ def main():
 
     target_chains = ["A", "B"]
 
-    # Architecture layout definition
+    # Architecture layout definition updated to absolute PDB positions to prevent broadcast mismatch
     architecture = [
-        {"type": "scaffold", "min": 10, "max": 50},  # Pad 1: N-terminal baseline loops (Residues 9–48)
+        {"type": "scaffold", "min": 9, "max": 48},  # Pad 1: N-terminal baseline loops (Residues 9–48)
         {"type": "motif", "min": 49, "max": 64},  # Cluster 1: cAMP Pocket Face
-        {"type": "scaffold", "min": 2, "max": 10},  # Pad 2: Short connector loop (Residues 65–70)
+        {"type": "scaffold", "min": 65, "max": 70},  # Pad 2: Short connector loop (Residues 65–70)
         {"type": "motif", "min": 71, "max": 86},  # Cluster 2: cAMP Pocket Floor
-        {"type": "scaffold", "min": 10, "max": 40},  # Pad 3: Core C-helix loop (Residues 87–122)
-        {"type": "motif", "min": 123, "max": 136},  # Cluster 3: Allosteric Hinge / Linker
+        {"type": "scaffold", "min": 87, "max": 155},  # Pad 3: Core C-helix loop (Residues 87–155)
 
-        # === SPLIT OLD PAD 4 TO CREATE AR1 INTERFACE MOTIF ===
-        {"type": "scaffold", "min": 5, "max": 20},  # Pad 4a: Handles residues 137-155
-        {"type": "motif", "min": 156, "max": 164},  # Cluster 4: NEW - Activating Region 1 (RpoA Contact Surface)
-        {"type": "scaffold", "min": 2, "max": 10},  # Pad 4b: Handles residues 165-168
+        # === SPLIT RESIDUES TO TRACK THE AR1 INTERFACE MOTIF ===
+        {"type": "motif", "min": 156, "max": 164},  # Cluster 3: Activating Region 1 (RpoA Contact Surface)
+        {"type": "scaffold", "min": 165, "max": 168},  # Pad 4: Handles residues 165-168
 
-        {"type": "motif", "min": 169, "max": 191},  # Cluster 5: DNA-Binding Helix-Turn-Helix (HTH)
-        {"type": "scaffold", "min": 5, "max": 25}  # Pad 5: C-terminal tail anchor (Residues 192–210)
+        {"type": "motif", "min": 169, "max": 191},  # Cluster 4: DNA-Binding Helix-Turn-Helix (HTH)
+        {"type": "scaffold", "min": 192, "max": 210}  # Pad 5: C-terminal tail anchor (Residues 192–210)
     ]
 
     # Generate REMARK 999 strings
@@ -73,8 +71,7 @@ def main():
             # Standard PDB character coordinates slicing
             chain_id = line[21:22].strip()
 
-            # CRITICAL CORRECTION: Keep ALL residues belonging to your target protein chains
-            # Do not filter out the scaffold regions, Switchcraft needs them for global anchors!
+            # Keep ALL residues belonging to your target protein chains
             if chain_id in target_chains:
                 if is_hetatm:
                     # Convert line type identifier
