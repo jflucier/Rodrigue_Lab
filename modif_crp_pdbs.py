@@ -37,7 +37,6 @@ def main():
             # Standard PDB character coordinates slicing
             chain_id = line[21:22].strip()
 
-            # CRITICAL FIX: Only parse and count residues if they belong strictly to A or B
             if chain_id in target_chains:
                 try:
                     res_seq = int(line[22:26].strip())
@@ -63,23 +62,32 @@ def main():
 
                 motif_atom_lines.append(line)
 
-    # Calculate exact protein sequence sizes
+    # DYNAMIC LOGIC: Calculate exact matching dimensions from true disk presence
     total_residues = len(unique_residues)
     if total_residues == 0:
         print("Error: No target residues found in the specified chains.")
         return
 
-    # Automatically set responsive bounds based strictly on chains A and B
+    # Find the true starting and ending points for each chain to prevent clipping
+    chain_a_res = [r for c, r in unique_residues if c == 'A']
+    chain_b_res = [r for c, r in unique_residues if c == 'B']
+
+    a_min, a_max = min(chain_a_res), max(chain_a_res)
+    b_min, b_max = min(chain_b_res), max(chain_b_res)
+
+    # Set boundaries with structural padding buffers
     min_len = total_residues - 4
     max_len = total_residues + 46
 
-    print(f"Dynamically mapped {total_residues} protein residues. Setting target limits to: {min_len} - {max_len}")
+    print(f"Dynamically mapped {total_residues} total protein residues.")
+    print(f"Chain A: {a_min} to {a_max} ({len(chain_a_res)} residues)")
+    print(f"Chain B: {b_min} to {b_max} ({len(chain_b_res)} residues)")
 
     header_lines = [
         f"REMARK 999 NAME   {motif_name.upper():<4}\n",
         f"REMARK 999 PDB    {motif_name.upper():<4}\n",
-        f"REMARK 999 INPUT  A   9 210\n",
-        f"REMARK 999 INPUT  B   9 210\n",
+        f"REMARK 999 INPUT  A  {a_min:>2} {a_max:>3}\n",
+        f"REMARK 999 INPUT  B  {b_min:>2} {b_max:>3}\n",
         f"REMARK 999 MINIMUM TOTAL LENGTH      {min_len}\n",
         f"REMARK 999 MAXIMUM TOTAL LENGTH      {max_len}\n"
     ]
@@ -88,7 +96,7 @@ def main():
         f.write("".join(header_lines))
         f.writelines(motif_atom_lines)
 
-    print(f"Success! Complete dynamic background template saved to: {args.output}")
+    print(f"Success! Perfect mathematical background template saved to: {args.output}")
 
 
 if __name__ == "__main__":
