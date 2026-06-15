@@ -4,7 +4,7 @@ import argparse
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Inject valid Switchcraft headers and normalize HETATMs while dynamically calculating length parameters from coordinates."
+        description="Inject valid Switchcraft headers and normalize HETATMs while strictly calculating target lengths from protein chains."
     )
     parser.add_argument("-i", "--input", required=True, help="Path to the original source PDB file")
     parser.add_argument("-o", "--output", required=True, help="Path where the new annotated PDB file should be saved")
@@ -20,16 +20,12 @@ def main():
     with open(args.input, 'r') as f:
         lines = f.readlines()
 
-    # Clean existing headers
     clean_lines = [l for l in lines if not l.startswith("REMARK 999") and not l.startswith("REMARK    motif_spec")]
 
     target_chains = ["A", "B"]
     motif_atom_lines = []
-
-    # Track unique tracking tuples (chain_id, res_seq) to calculate exact size
     unique_residues = set()
 
-    # Process and clean lines first to get accurate coordinates
     for line in clean_lines:
         is_atom = line.startswith("ATOM  ")
         is_hetatm = line.startswith("HETATM")
@@ -41,7 +37,7 @@ def main():
             # Standard PDB character coordinates slicing
             chain_id = line[21:22].strip()
 
-            # Keep ALL residues belonging to your target protein chains
+            # CRITICAL FIX: Only parse and count residues if they belong strictly to A or B
             if chain_id in target_chains:
                 try:
                     res_seq = int(line[22:26].strip())
@@ -67,19 +63,18 @@ def main():
 
                 motif_atom_lines.append(line)
 
-    # 🔥 DYNAMIC CALCULATION SECTION 🔥
+    # Calculate exact protein sequence sizes
     total_residues = len(unique_residues)
     if total_residues == 0:
         print("Error: No target residues found in the specified chains.")
         return
 
-    # Automatically set responsive bounds based on the true physical chain length
+    # Automatically set responsive bounds based strictly on chains A and B
     min_len = total_residues - 4
     max_len = total_residues + 46
 
-    print(f"Dynamically mapped {total_residues} residues. Setting target limits to: {min_len} - {max_len}")
+    print(f"Dynamically mapped {total_residues} protein residues. Setting target limits to: {min_len} - {max_len}")
 
-    # Core architecture sizing headers matching native git-cloned formats
     header_lines = [
         f"REMARK 999 NAME   {motif_name.upper():<4}\n",
         f"REMARK 999 PDB    {motif_name.upper():<4}\n",
@@ -89,7 +84,6 @@ def main():
         f"REMARK 999 MAXIMUM TOTAL LENGTH      {max_len}\n"
     ]
 
-    # Write out the complete file containing all background sequences
     with open(args.output, 'w') as f:
         f.write("".join(header_lines))
         f.writelines(motif_atom_lines)
