@@ -32,20 +32,10 @@ def main():
 
     target_chains = ["A", "B"]
 
-    # Architecture layout definition updated to absolute PDB positions to prevent broadcast mismatch
+    # Architecture layout flattened to avoid variable-length sampling infinite loops
+    # The entire CRP monomer sequence is treated as a continuous, fixed-length motif envelope
     architecture = [
-        {"type": "scaffold", "min": 9, "max": 48},  # Pad 1: N-terminal baseline loops (Residues 9–48)
-        {"type": "motif", "min": 49, "max": 64},  # Cluster 1: cAMP Pocket Face
-        {"type": "scaffold", "min": 65, "max": 70},  # Pad 2: Short connector loop (Residues 65–70)
-        {"type": "motif", "min": 71, "max": 86},  # Cluster 2: cAMP Pocket Floor
-        {"type": "scaffold", "min": 87, "max": 155},  # Pad 3: Core C-helix loop (Residues 87–155)
-
-        # === SPLIT RESIDUES TO TRACK THE AR1 INTERFACE MOTIF ===
-        {"type": "motif", "min": 156, "max": 164},  # Cluster 3: Activating Region 1 (RpoA Contact Surface)
-        {"type": "scaffold", "min": 165, "max": 168},  # Pad 4: Handles residues 165-168
-
-        {"type": "motif", "min": 169, "max": 191},  # Cluster 4: DNA-Binding Helix-Turn-Helix (HTH)
-        {"type": "scaffold", "min": 192, "max": 210}  # Pad 5: C-terminal tail anchor (Residues 192–210)
+        {"type": "motif", "min": 9, "max": 210}
     ]
 
     # Generate REMARK 999 strings
