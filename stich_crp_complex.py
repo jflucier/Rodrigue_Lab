@@ -60,11 +60,15 @@ def main():
 
     # 3. Transform the reference assembly coordinate system
     # This brings the full 4-domain framework into the design space
+    print("Transforming reference coordinate space...")
+    rot, tran = superimposer.rotran  # 🔥 BUGFIX: Unpack the rotation and translation tuple
+
     for chain in ref_model:
         for residue in chain:
             for atom in residue:
                 coord = atom.get_coord()
-                new_coord = np.dot(coord, superimposer.rotran) + superimposer.rotran
+                # Apply rotation matrix multiplication, then add translation vector offset
+                new_coord = np.dot(coord, rot) + tran
                 atom.set_coord(new_coord)
 
     # 4. Assemble the composite model geometry
