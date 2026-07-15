@@ -62,19 +62,49 @@ if [ ! -f "${INPUT_PDB}" ]; then
     exit 1
 fi
 
-if [ -z "$CHAIN" ]; then
-    # Grab the first character found in column 5 (the chain ID column) of the first ATOM row
-    CHAIN=$(grep -m 1 "^ATOM" "$INPUT_PDB" | awk '{print substr($0, 22, 1)}')
-    echo "Notice: No explicit chain provided. Automatically detected Target Chain: ${CHAIN}"
-else
-    # Verify the user-provided chain letter actually exists in the file
-    CHAIN_CHECK=$(grep "^ATOM" "$INPUT_PDB" | awk '{print substr($0, 22, 1)}' | grep -m 1 "$CHAIN")
-    if [ -z "$CHAIN_CHECK" ]; then
-        echo "Error: The requested chain '${CHAIN}' was not found in ${INPUT_PDB}!"
-        exit 1
-    fi
-    echo "Success: Using explicitly requested Target Chain: ${CHAIN}"
+echo "Analyzing ${INPUT_PDB} for chain ${CHAIN} sequence gaps..."
+
+# Extract sorted, unique residue numbers for the chosen chain
+RESIDUES=($(awk -v ch="$CHAIN" 'BEGIN{FS=""} /^ATOM/ && $22==ch {print substr($0,23,4)}' "$INPUT_PDB" | sort -nu))
+
+if [ ${#RESIDUES[@]} -eq 0 ]; then
+    echo "Error: No residues found for chain ${CHAIN} in PDB file."
+    exit 1
 fi
+
+CONTIG_STR=""
+START_SEG=${RESIDUES[0]}
+PREV_SEG=${RESIDUES[0]}
+
+for RES in "${RESIDUES[@]:1}"; do
+    # Check if there is a jump/gap in numbering
+    if [ $((RES - PREV_SEG)) -gt 1 ]; then
+        # Close the completed continuous segment and append it
+        CONTIG_STR="${CONTIG_STR}${CHAIN}${START_SEG}-${PREV_SEG}/0 "
+        START_SEG=$RES
+    fi
+    PREV_SEG=$RES
+done
+# Append the final remaining structural segment
+CONTIG_STR="${CONTIG_STR}${CHAIN}${START_SEG}-${PREV_SEG}/0"
+
+# Append your binder generation definition (15 to 80 amino acids long)
+FULL_CONTIG="[${CONTIG_STR} 15-80]"
+echo "Generated Gap-Aware Contig: ${FULL_CONTIG}"
+
+#if [ -z "$CHAIN" ]; then
+#    # Grab the first character found in column 5 (the chain ID column) of the first ATOM row
+#    CHAIN=$(grep -m 1 "^ATOM" "$INPUT_PDB" | awk '{print substr($0, 22, 1)}')
+#    echo "Notice: No explicit chain provided. Automatically detected Target Chain: ${CHAIN}"
+#else
+#    # Verify the user-provided chain letter actually exists in the file
+#    CHAIN_CHECK=$(grep "^ATOM" "$INPUT_PDB" | awk '{print substr($0, 22, 1)}' | grep -m 1 "$CHAIN")
+#    if [ -z "$CHAIN_CHECK" ]; then
+#        echo "Error: The requested chain '${CHAIN}' was not found in ${INPUT_PDB}!"
+#        exit 1
+#    fi
+#    echo "Success: Using explicitly requested Target Chain: ${CHAIN}"
+#fi
 
 if [ ! -f "${CONTAINER_SIF}" ]; then
     echo "Error: The ProteinMPNN Singularity container image was not found!"
@@ -103,7 +133,7 @@ inference.output_prefix="$RF_OUT/${NAME}" \
 inference.num_designs="$NUM_DESIGNS" \
 inference.model_directory_path=${PROGRAMS}/models \
 hydra.run.dir="$WDIR" \
-"contigmap.contigs=[${CHAIN}${FIRST_RES}-${LAST_RES}/0 15-80]" \
+"contigmap.contigs=${FULL_CONTIG}" \
 denoiser.noise_scale_ca=0 \
 denoiser.noise_scale_frame=0
 
