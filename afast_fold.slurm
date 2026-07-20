@@ -12,7 +12,6 @@
 ml apptainer/1.3.5
 ml cuda/12.2
 
-NAME=""
 BASE_PATH="/scratch/jflucier/20260602_crp_rnapol/alphafast"
 AFAST="/scratch/jflucier/programs/alphafast"
 

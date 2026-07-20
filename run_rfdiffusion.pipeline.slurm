@@ -158,8 +158,7 @@ apptainer exec --nv --bind /scratch/jflucier:/scratch/jflucier "$CONTAINER_SIF" 
     --chain_id_jsonl "$MPNN_OUT/chain_id_map.jsonl" \
     --out_folder "$MPNN_OUT" \
     --num_seq_per_target 10 \
-    --sampling_temp "0.1" \
-    --seed 42 \
+    --sampling_temp "0.2" \
     --batch_size 1
 
 echo "Sequence design complete. Compiling and sorting metrics table..."
