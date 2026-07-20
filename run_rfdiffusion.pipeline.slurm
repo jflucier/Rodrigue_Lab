@@ -3,8 +3,8 @@
 #SBATCH --output=RFdiff_binder_%x_%j.out
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=8
-#SBATCH --mem=62G
+#SBATCH --cpus-per-task=2
+#SBATCH --mem=15G
 #SBATCH --gpus=h100_3g.40gb:1
 #SBATCH --time=48:00:00
 #SBATCH --account=def-rodrigu1
@@ -24,7 +24,7 @@ CHAIN=""
 PROGRAMS=/scratch/jflucier/programs/RFdiffusion
 CONTAINER_SIF="/scratch/jflucier/programs/proteinmpnn.sif"
 
-TEMP=$(getopt -o n:b:c: --long name:,base_path:,chain: -n 'run_rfdiffusion.slurm' -- "$@")
+TEMP=$(getopt -o n:b:c:s --long name:,base_path:,chain:,skip_rfdiffusion -n 'run_rfdiffusion.slurm' -- "$@")
 if [ $? -ne 0 ]; then echo "Terminating..." >&2 ; exit 1 ; fi
 eval set -- "$TEMP"
 
@@ -33,6 +33,7 @@ while true ; do
         -n|--name) NAME="$2" ; shift 2 ;;
         -b|--base_path) BASE_PATH="$2" ; shift 2 ;;
         -c|--chain) CHAIN="$2" ; shift 2 ;;
+        -s|--skip_rfdiffusion) SKIP_RF=1 ; shift ;;
         --) shift ; break ;;
         *) echo "Invalid Option" ; exit 1 ;;
     esac
@@ -92,20 +93,6 @@ CONTIG_STR="${CONTIG_STR}${CHAIN}${START_SEG}-${PREV_SEG}/0"
 FULL_CONTIG="[${CONTIG_STR} 15-80]"
 echo "Generated Gap-Aware Contig: ${FULL_CONTIG}"
 
-#if [ -z "$CHAIN" ]; then
-#    # Grab the first character found in column 5 (the chain ID column) of the first ATOM row
-#    CHAIN=$(grep -m 1 "^ATOM" "$INPUT_PDB" | awk '{print substr($0, 22, 1)}')
-#    echo "Notice: No explicit chain provided. Automatically detected Target Chain: ${CHAIN}"
-#else
-#    # Verify the user-provided chain letter actually exists in the file
-#    CHAIN_CHECK=$(grep "^ATOM" "$INPUT_PDB" | awk '{print substr($0, 22, 1)}' | grep -m 1 "$CHAIN")
-#    if [ -z "$CHAIN_CHECK" ]; then
-#        echo "Error: The requested chain '${CHAIN}' was not found in ${INPUT_PDB}!"
-#        exit 1
-#    fi
-#    echo "Success: Using explicitly requested Target Chain: ${CHAIN}"
-#fi
-
 if [ ! -f "${CONTAINER_SIF}" ]; then
     echo "Error: The ProteinMPNN Singularity container image was not found!"
     echo "Expected path: ${CONTAINER_SIF}"
@@ -124,18 +111,28 @@ FIRST_RES=$(awk -v ch="$CHAIN" 'BEGIN{FS=""} /^ATOM/ && $22==ch {print substr($0
 LAST_RES=$(awk -v ch="$CHAIN" 'BEGIN{FS=""} /^ATOM/ && $22==ch {last=substr($0,23,4)} END{print last}' "$INPUT_PDB" | tr -d ' ')
 echo "Detected residue range for Target Chain ${CHAIN}: ${FIRST_RES} to ${LAST_RES}"
 
-# Run RFdiffusion to target the interface
-echo "running rfdiffusion"
-#  If hotspots, add 'ppi.hotspot_res='$HOTSPOTS \
-python ${PROGRAMS}/scripts/run_inference.py \
-inference.input_pdb="$INPUT_PDB" \
-inference.output_prefix="$RF_OUT/${NAME}" \
-inference.num_designs="$NUM_DESIGNS" \
-inference.model_directory_path=${PROGRAMS}/models \
-hydra.run.dir="$WDIR" \
-"contigmap.contigs=${FULL_CONTIG}" \
-denoiser.noise_scale_ca=0 \
-denoiser.noise_scale_frame=0
+if [ $SKIP_RF -eq 1 ]; then
+    echo "Notice: --skip_rfdiffusion parameter passed."
+    # Ensure that target directory has structures to pass down to ProteinMPNN
+    if [ -z "$(ls -A "$RF_OUT" 2>/dev/null | grep '\.pdb$')" ]; then
+        echo "Error: Cannot skip RFdiffusion because no pre-existing generated PDB files were found in $RF_OUT"
+        exit 1
+    fi
+    echo "Skipping RFdiffusion generation. Using existing backbones inside: $RF_OUT"
+else
+  # Run RFdiffusion to target the interface
+  echo "running rfdiffusion"
+  #  If hotspots, add 'ppi.hotspot_res='$HOTSPOTS \
+  python ${PROGRAMS}/scripts/run_inference.py \
+  inference.input_pdb="$INPUT_PDB" \
+  inference.output_prefix="$RF_OUT/${NAME}" \
+  inference.num_designs="$NUM_DESIGNS" \
+  inference.model_directory_path=${PROGRAMS}/models \
+  hydra.run.dir="$WDIR" \
+  "contigmap.contigs=${FULL_CONTIG}" \
+  denoiser.noise_scale_ca=0 \
+  denoiser.noise_scale_frame=0
+fi
 
 echo "running parse_multiple_chains"
 apptainer exec --nv --bind /scratch/jflucier:/scratch/jflucier "$CONTAINER_SIF" \
