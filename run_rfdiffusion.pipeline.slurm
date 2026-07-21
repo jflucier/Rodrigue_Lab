@@ -197,7 +197,11 @@ getline_flag == 1 {
 
 # Lock down the header row, sort the numeric body data, and compile everything into your final file
 head -n 1 ${BASE_PATH}/binders/${NAME}_mpnnmetrics.unsorted.tsv > ${BASE_PATH}/binders/${NAME}_mpnnmetrics.tsv
-tail -n +2 ${BASE_PATH}/binders/${NAME}_mpnnmetrics.unsorted.tsv | sort -t$'\t' -k2,2n >> ${BASE_PATH}/binders/${NAME}_mpnnmetrics.tsv
+
+tail -n +2 ${BASE_PATH}/binders/${NAME}_mpnnmetrics.unsorted.tsv | \
+sort -t$'\t' -k2,2n | \
+awk -F'\t' '!seen[$6]++' >> ${BASE_PATH}/binders/${NAME}_mpnnmetrics.tsv
+
 rm ${BASE_PATH}/binders/${NAME}_mpnnmetrics.unsorted.tsv
 
 echo "done"
