@@ -140,12 +140,16 @@ apptainer exec --nv --bind /scratch/jflucier:/scratch/jflucier "$CONTAINER_SIF" 
     --input_path="$RF_OUT" \
     --output_path="$MPNN_OUT/parsed_pdbs.jsonl"
 
+# Calculate the next letter in the alphabet for the binder chain
+DESIGN_CHAIN=$(echo "$CHAIN" | tr 'A-Za-z' 'B-ZAb-za')
+
+echo "Target chain is ${CHAIN}. Setting ProteinMPNN to design Binder Chain: ${DESIGN_CHAIN}"
 echo "running assign_fixed_chains"
 apptainer exec --nv --bind /scratch/jflucier:/scratch/jflucier "$CONTAINER_SIF" \
     python /app/proteinmpnn/helper_scripts/assign_fixed_chains.py \
     --input_path="$MPNN_OUT/parsed_pdbs.jsonl" \
     --output_path="$MPNN_OUT/chain_id_map.jsonl" \
-    --chain_list "A"
+    --chain_list "${DESIGN_CHAIN}"
 
 # 2. Run ProteinMPNN
 echo "running protein_mpnn_run"
