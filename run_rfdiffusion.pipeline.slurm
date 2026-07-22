@@ -128,7 +128,7 @@ WDIR="${RF_OUT}/work"
 CACHE_DIR="${RF_OUT}/schedules_cache"
 mkdir -p "$WDIR" "$RF_OUT" "$MPNN_OUT" "$CACHE_DIR"
 
-if [ $SKIP_RF -eq 1 ]; then
+if [ "$SKIP_RF" -eq 1 ]; then
     echo "Notice: --skip_rfdiffusion parameter passed."
     # Ensure that target directory has structures to pass down to ProteinMPNN
     if [ -z "$(ls -A "$RF_OUT" 2>/dev/null | grep '\.pdb$')" ]; then
