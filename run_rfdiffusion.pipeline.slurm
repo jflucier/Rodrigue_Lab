@@ -6,7 +6,7 @@
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=15G
 #SBATCH --gpus=h100_3g.40gb:1
-#SBATCH --time=1:00:00
+#SBATCH --time=48:00:00
 #SBATCH --account=def-rodrigu1
 
 ml apptainer/1.3.5
