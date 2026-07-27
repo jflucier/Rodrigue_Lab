@@ -5,7 +5,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=62G
-#SBATCH --gpus=h100_3g.40gb:4
+#SBATCH --gpus=h100:4
 #SBATCH --time=72:00:00
 #SBATCH --account=def-rodrigu1
 
