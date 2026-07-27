@@ -3,10 +3,10 @@
 #SBATCH --output=afast_%x_%j.out
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=2
+#SBATCH --cpus-per-task=8
 #SBATCH --mem=62G
-#SBATCH --gpus=h100_3g.40gb:1
-#SBATCH --time=48:00:00
+#SBATCH --gpus=h100_3g.40gb:4
+#SBATCH --time=72:00:00
 #SBATCH --account=def-rodrigu1
 
 ml apptainer/1.3.5
@@ -60,5 +60,5 @@ ${AFAST}/scripts/run_alphafast.sh \
     --temp_dir $SLURM_TMPDIR/alphafast_tmp \
     --container ${AFAST}/alphafast.sif \
     --jax_compilation_cache_dir $SLURM_TMPDIR/alphafast_jax_cache \
-    --gpu_devices 0
+    --gpu_devices 0,1,2,3
 echo "done"

@@ -39,58 +39,75 @@ def main():
     with open(args.input_tsv, mode='r', newline='', encoding='utf-8') as f:
         reader = csv.DictReader(f, delimiter='\t')
 
-        # Verify required headers are present in the TSV file
-        required_headers = [
-            'protein1_name', 'protein1_nbr', 'protein1_seq',
-            'protein2_name', 'protein2_nbr', 'protein2_seq'
-        ]
-        missing = [h for h in required_headers if h not in reader.fieldnames]
-        if missing:
-            print(f"Error: Input TSV is missing required column headers: {missing}", file=sys.stderr)
-            sys.exit(1)
-
         generated_count = 0
         for row_idx, row in enumerate(reader, start=1):
             try:
-                p1_name = row['protein1_name']
-                p2_name = row['protein2_name']
-                p1_seq = row['protein1_seq'].strip()
-                p2_seq = row['protein2_seq'].strip()
+                sequences_array = []
+                current_chain_offset = 0
+                last_protein_name = "unknown"
 
-                # Convert numeric strings to counts
-                p1_count = int(row['protein1_nbr'])
-                p2_count = int(row['protein2_nbr'])
+                # Check consecutive numbers dynamically starting from 1 for this specific row
+                p_idx = 1
+                while True:
+                    name_key = f"protein{p_idx}_name"
+                    seq_key = f"protein{p_idx}_seq"
+                    nbr_key = f"protein{p_idx}_nbr"
 
-                # Dynamically calculate non-overlapping chain letters (e.g., A,B and then C)
-                p1_ids = get_chain_ids(0, p1_count)
-                p2_ids = get_chain_ids(p1_count, p2_count)
+                    # Break the inner cell loop as soon as no column keys exist for this number index
+                    if name_key not in row:
+                        break
 
-                # Construct JSON schema matching AlphaFold3 specification
-                json_data = {
-                    "name": f"{p1_name}__{p2_name}",
-                    "sequences": [
-                        {
-                            "protein": {
-                                "id": p1_ids,
-                                "sequence": p1_seq
-                            }
-                        },
-                        {
-                            "protein": {
-                                "id": p2_ids,
-                                "sequence": p2_seq
-                            }
+                    p_name = (row[name_key] or "").strip()
+                    p_seq = (row[seq_key] or "").strip()
+                    p_nbr_str = (row[nbr_key] or "").strip()
+
+                    # If this optional slot column exists but is completely blank in this specific row,
+                    # check if higher indices exist (safeguard against empty middle column values)
+                    if not p_name and not p_seq:
+                        p_idx += 1
+                        # Dynamic boundary break if we exceed the header keys length
+                        if p_idx > len(row):
+                            break
+                        continue
+
+                    # Fallback assignment for stoichiometric counts
+                    p_count = int(p_nbr_str) if p_nbr_str else 1
+
+                    # Map continuous non-overlapping alphabet letters across partners
+                    p_ids = get_chain_ids(current_chain_offset, p_count)
+                    current_chain_offset += p_count
+
+                    last_protein_name = p_name
+
+                    sequences_array.append({
+                        "protein": {
+                            "id": p_ids,
+                            "sequence": p_seq
                         }
-                    ],
-                    "modelSeeds": [1, 2, 3],
+                    })
+
+                    p_idx += 1
+
+                # Skip completely empty rows
+                if not sequences_array:
+                    continue
+
+                # Complex Naming Architecture Logic
+                multimer_prefix = (row.get('multimer_name') or "").strip()
+                if multimer_prefix:
+                    output_filename = f"{multimer_prefix}__{last_protein_name}.json"
+                else:
+                    output_filename = f"{last_protein_name}_complex_{row_idx}.json"
+
+                json_data = {
+                    "name": output_filename.replace(".json", ""),
+                    "sequences": sequences_array,
+                    "modelSeeds": list(range(1, 4)),
                     "dialect": "alphafold3",
                     "version": 3
                 }
 
-                # Create isolated destination filepath
-                output_filename = f"{p1_name}__{p2_name}.json"
                 full_output_path = os.path.join(args.output_dir, output_filename)
-
                 with open(full_output_path, 'w', encoding='utf-8') as out_f:
                     json.dump(json_data, out_f, indent=2)
 
@@ -102,7 +119,7 @@ def main():
             except Exception as e:
                 print(f"Warning: Skipping row {row_idx} due to unexpected processing error: {e}", file=sys.stderr)
 
-        print(
+    print(
             f"Successfully processed matrix list. Generated {generated_count} JSON structural payloads inside: {args.output_dir}")
 
 
