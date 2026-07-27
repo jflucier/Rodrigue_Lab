@@ -3,7 +3,7 @@
 #SBATCH --output=afast_%x_%j.out
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=8
+#SBATCH --cpus-per-task=2
 #SBATCH --mem=62G
 #SBATCH --gpus=h100:1
 #SBATCH --time=48:00:00

@@ -152,6 +152,23 @@ else
   denoiser.noise_scale_frame=0
 fi
 
+echo "analyse rfdiffusion pdb to determine target chain"
+GENERATED_PDB=$(ls -1 "$RF_OUT"/*.pdb 2>/dev/null | head -n 1)
+
+if [ -f "$GENERATED_PDB" ]; then
+    # Grab all unique chain IDs present in the output file
+    PDB_CHAINS=$(awk '/^ATOM/ {print substr($0,22,1)}' "$GENERATED_PDB" | sort -u | tr -d '\n\r ')
+
+    # The binder is ALWAYS the absolute final chain appended by RFdiffusion
+    DESIGN_CHAIN="${PDB_CHAINS: -1}"
+    echo "PDB analytics detected chains: [${PDB_CHAINS}]. Extracted Binder Chain: ${DESIGN_CHAIN}"
+else
+    # Fallback to your standard method if running with --skip_rfdiffusion
+    LAST_INPUT_CHAIN=$(echo "${ATOM_CHAINS[@]}" | tr ' ' '\n' | sort | tail -n 1)
+    DESIGN_CHAIN=$(echo "$LAST_INPUT_CHAIN" | tr 'A-Za-z' 'B-ZAb-za')
+    echo "Notice: No new backbones found. Using alphabet fallback design chain: ${DESIGN_CHAIN}"
+fi
+
 echo "running parse_multiple_chains"
 apptainer exec --nv --bind /scratch/jflucier:/scratch/jflucier "$CONTAINER_SIF" \
     python /app/proteinmpnn/helper_scripts/parse_multiple_chains.py \
@@ -159,8 +176,8 @@ apptainer exec --nv --bind /scratch/jflucier:/scratch/jflucier "$CONTAINER_SIF" 
     --output_path="$MPNN_OUT/parsed_pdbs.jsonl"
 
 # Safely isolate the alphabetically last input chain to compute the design letter assignment
-LAST_INPUT_CHAIN=$(echo "${ATOM_CHAINS[@]}" | tr ' ' '\n' | sort | tail -n 1)
-DESIGN_CHAIN=$(echo "$LAST_INPUT_CHAIN" | tr 'A-Za-z' 'B-ZAb-za')
+#LAST_INPUT_CHAIN=$(echo "${ATOM_CHAINS[@]}" | tr ' ' '\n' | sort | tail -n 1)
+#DESIGN_CHAIN=$(echo "$LAST_INPUT_CHAIN" | tr 'A-Za-z' 'B-ZAb-za')
 
 echo "Target chain(s) are [${CHAIN}]. Setting ProteinMPNN to design Binder Chain: ${DESIGN_CHAIN}"
 echo "running assign_fixed_chains"
