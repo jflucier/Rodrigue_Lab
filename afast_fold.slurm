@@ -3,10 +3,10 @@
 #SBATCH --output=afast_%x_%j.out
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=2
+#SBATCH --cpus-per-task=4
 #SBATCH --mem=62G
 #SBATCH --gpus=h100_3g.40gb:1
-#SBATCH --time=48:00:00
+#SBATCH --time=24:00:00
 #SBATCH --account=def-rodrigu1
 
 ml apptainer/1.3.5
