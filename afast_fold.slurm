@@ -49,11 +49,45 @@ if [ ! -d "$BASE_PATH" ]; then
     exit 1
 fi
 
+if [ -n "$SLURM_ARRAY_TASK_ID" ]; then
+  echo "Notice: Slurm Job Array mode detected. Running index: ${SLURM_ARRAY_TASK_ID}"
+
+  TASK_INPUT_DIR="$SLURM_TMPDIR/inputs_task_${SLURM_ARRAY_TASK_ID}"
+  mkdir -p "$TASK_INPUT_DIR"
+  ALL_INPUTS=($(ls -1 "${BASE_PATH}/inputs"/*.json | sort))
+  TOTAL_INPUTS=${#ALL_INPUTS[@]}
+  CHUNK_SIZE=100
+  START_IDX=$((SLURM_ARRAY_TASK_ID * CHUNK_SIZE))
+  END_IDX=$((START_IDX + CHUNK_SIZE - 1))
+
+  # Prevent index out of bounds on the final task chunk iteration
+  if [ $END_IDX -ge $TOTAL_INPUTS ]; then
+      END_IDX=$((TOTAL_INPUTS - 1))
+  fi
+
+  # Symlink the exact assigned JSON block into the temporary folder
+  for ((i=START_IDX; i<=END_IDX; i++)); do
+      FILE_PATH="${ALL_INPUTS[i]}"
+      if [ -f "$FILE_PATH" ]; then
+          cp "$FILE_PATH" "$TASK_INPUT_DIR/$(basename "$FILE_PATH")"
+      fi
+  done
+else
+  TASK_INPUT_DIR="$SLURM_TMPDIR/inputs_task"
+  mkdir -p "$TASK_INPUT_DIR"
+  cp "${BASE_PATH}"/inputs/* "${TASK_INPUT_DIR}"
+fi
+
+if [ -z "$(ls -A "$TASK_INPUT_DIR" 2>/dev/null)" ]; then
+    echo "Notice: No files assigned to this array task index. Exiting cleanly."
+    exit 0
+fi
+
 echo "Base Path:  $BASE_PATH"
 echo "AFAST: $AFAST"
 echo "Running alphafast on ${BASE_PATH}/inputs"
 ${AFAST}/scripts/run_alphafast.sh \
-    --input_dir ${BASE_PATH}/inputs \
+    --input_dir "${TASK_INPUT_DIR}" \
     --output_dir ${BASE_PATH}/outputs \
     --db_dir ${AFAST}/dbs \
     --weights_dir ${AFAST}/weights \
