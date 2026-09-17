@@ -1,0 +1,49 @@
+Bootstrap: docker
+From: nvcr.io/nvidia/pytorch:24.03-py3
+
+%post
+    export DEBIAN_FRONTEND=noninteractive
+
+    # 1. Install critical system utilities
+    apt-get update && apt-get install -y \
+        git wget cmake curl python3-pip python3-dev \
+        && rm -rf /var/lib/apt/lists/*
+
+    # 2. Upgrade pip and build tools
+    pip3 install --no-cache-dir --upgrade pip setuptools wheel
+
+    # 3. Install core geometric and structural math libraries
+    # (By avoiding pre-compiled wheels, these compile cleanly from source for aarch64)
+    pip3 install --no-cache-dir \
+        pyyaml \
+        hydra-core \
+        omegaconf \
+        icecream \
+        pyrsistent \
+        e3nn \
+        scipy
+
+    # 4. Install DGL explicitly compiled from source to avoid any missing C++ .so or GraphBolt errors
+    # (This takes a few minutes but guarantees absolute stability on GH200)
+    pip3 install --no-cache-dir dgl==2.1.0 --no-binary dgl
+
+    # 5. Build NVIDIA's SE(3)-Transformer from source
+    git clone https://github.com /opt/SE3-Transformer
+    cd /opt/SE3-Transformer
+    pip3 install --no-cache-dir -r requirements.txt
+    python3 setup.py install
+    cd /
+
+    # 6. Install RFdiffusion
+    git clone https://github.com /opt/RFdiffusion
+    cd /opt/RFdiffusion
+    pip3 install --no-cache-dir -e .
+
+%environment
+    export LC_ALL=C
+    export PATH=/opt/RFdiffusion/scripts:$PATH
+    # Direct DGL to use the native PyTorch backend out of the box
+    export DGLBACKEND="pytorch"
+
+%runscript
+    python3 /opt/RFdiffusion/scripts/run_inference.py "$@"
