@@ -1,0 +1,42 @@
+### on rorqual
+BASE_PATH="/scratch/jflucier/20260602_crp_rnapol"
+AF_PATH="/scratch/jflucier/programs/alphafold3"
+
+module load StdEnv/2023 hmmer-alphafold3/3.4 rdkit/2024.03.5 python/3.12
+mkdir alphafold3
+cd alphafold3
+wget https://raw.githubusercontent.com/google-deepmind/alphafold3/refs/tags/v3.0.2/run_alphafold.py
+virtualenv --no-download ${AF_PATH}/venv
+source ${AF_PATH}/venv/bin/activate
+pip install --no-index --upgrade pip
+module load gcc rdkit
+pip install --no-index alphafold3==3.0.2
+build_data
+python run_alphafold.py --help
+pip freeze > ${AF_PATH}/alphafold3-requirements.txt
+deactivate
+
+wget https://raw.githubusercontent.com/google-deepmind/alphafold3/refs/heads/main/fetch_databases.sh
+mkdir -p $AF_PATH/dbs
+bash fetch_databases.sh $AF_PATH/dbs
+
+### install alphafast on GH
+PROGRAMS="/home/jflucier/programs"
+cd $PROGRAMS
+git clone https://github.com/RomeroLab/alphafast.git
+cd $PROGRAMS/alphafast
+python3.11 -m venv $PROGRAMS/alphafast/venv
+source $PROGRAMS/alphafast/venv/bin/activate
+
+curl -LsSf https://hf.co/cli/install.sh | bash
+./scripts/setup_databases.sh /net/nfs-bio/fast2/alphafast_dbs --from-prebuilt
+
+ml apptainer
+singularity pull alphafast.sif docker://romerolabduke/alphafast:latest
+
+## weights
+cd ${PROGRAMS}/
+ln -s /home/jflucier/links/scratch/programs/alphafold3/weights .
+
+### install alphafast on gh
+

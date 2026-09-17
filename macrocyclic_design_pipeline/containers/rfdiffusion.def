@@ -1,0 +1,34 @@
+# build new image using this command:
+# singularity build --force --fakeroot rfdiffusion.sif rfdiffusion.def
+# singularity exec --writable-tmpfs -e rfdiffusion.sif busco
+
+
+Bootstrap: docker
+From: nvcr.io/nvidia/cuda:12.4.1-devel-ubuntu22.04
+
+%post
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update && apt-get install -y git wget cmake curl python3-pip python3-dev
+    rm -rf /var/lib/apt/lists/*
+
+    # Install ARM64 PyTorch and matching CUDA 12 wheels
+    pip3 install --no-cache-dir torch torchvision --index-url https://pytorch.org
+    pip3 install dgl -f https://dgl.ai
+
+    # Build the SE(3)-Transformer from source for ARM64 compatibility
+    git clone https://github.com /opt/SE3-Transformer
+    cd /opt/SE3-Transformer
+    pip3 install --no-cache-dir -r requirements.txt
+    python3 setup.py install
+
+    # Install RFdiffusion code
+    git clone https://github.com/RosettaCommons/RFdiffusion.git /opt/RFdiffusion
+    cd /opt/RFdiffusion
+    pip3 install -e .
+
+%environment
+    export LC_ALL=C
+    export PATH=/opt/RFdiffusion/scripts:$PATH
+
+%runscript
+    python3 /opt/RFdiffusion/scripts/run_inference.py "$@"

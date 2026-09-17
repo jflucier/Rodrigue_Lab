@@ -1,0 +1,4 @@
+"design_name"	"pdb_path"	"hotspots"	"length"
+"MCL1_campaign"	"/data/targets/mcl1.pdb"	"A224,A227,A252,A263,A266"	"10-14"
+"MDM2_campaign"	"/data/targets/mdm2.pdb"	"A54,A57,A72,A93,A96"	"10-14"
+"GABARAP_campaign"	"/data/targets/gabarap.pdb"	"A48,A50,A51,A52,A65"	"10-14"
