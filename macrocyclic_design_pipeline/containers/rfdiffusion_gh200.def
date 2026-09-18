@@ -4,45 +4,61 @@ From: nvcr.io/nvidia/pytorch:24.03-py3
 %post
     export DEBIAN_FRONTEND=noninteractive
 
-    # 1. Install critical system utilities
+    # 1. Install necessary system build tools
     apt-get update && apt-get install -y \
-        git wget cmake curl python3-pip python3-dev \
+        cmake build-essential python3-pip python3-dev \
         && rm -rf /var/lib/apt/lists/*
 
-    # 2. Upgrade pip and build tools
-    pip3 install --no-cache-dir --upgrade pip setuptools wheel
-
-    # 3. Install core geometric and structural math libraries
-    # (By avoiding pre-compiled wheels, these compile cleanly from source for aarch64)
+    # 2. Install purely python-level dependencies from internal fallback caches
     pip3 install --no-cache-dir \
-        pyyaml \
-        hydra-core \
-        omegaconf \
-        icecream \
-        pyrsistent \
-        e3nn \
-        scipy
+        pyyaml hydra-core omegaconf icecream pyrsistent e3nn scipy pydantic
 
-    # 4. Install DGL explicitly compiled from source to avoid any missing C++ .so or GraphBolt errors
-    # (This takes a few minutes but guarantees absolute stability on GH200)
-    pip3 install --no-cache-dir dgl==2.1.0 --no-binary dgl
+    pip3 install --no-cache-dir dgl -f https://data.dgl.ai/wheels/torch-2.4/repo.html
 
-    # 5. Build NVIDIA's SE(3)-Transformer from source
-    git clone https://github.com /opt/SE3-Transformer
-    cd /opt/SE3-Transformer
-    pip3 install --no-cache-dir -r requirements.txt
-    python3 setup.py install
-    cd /
-
-    # 6. Install RFdiffusion
-    git clone https://github.com /opt/RFdiffusion
+    # 3. Natively compile DGL from the injected local source code
+    # This ensures C++ graph structures match your GH200 hardware architecture exactly
+#    cd /opt/dgl_source
+#    mkdir build
+#    cd build
+#    cmake -DUSE_CUDA=ON ..
+#    make -j4
+#    cd ../python
+#    python3 setup.py install
+#    cd /
+    git clone https://github.com/RosettaCommons/RFdiffusion.git /opt/RFdiffusion
     cd /opt/RFdiffusion
-    pip3 install --no-cache-dir -e .
+
+    # skip fo now!
+    mkdir models && cd models
+#    wget http://files.ipd.uw.edu/pub/RFdiffusion/6f5902ac237024bdd0c176cb93063dc4/Base_ckpt.pt
+#    wget http://files.ipd.uw.edu/pub/RFdiffusion/e29311f6f1bf1af907f9ef9f44b8328b/Complex_base_ckpt.pt
+#    wget http://files.ipd.uw.edu/pub/RFdiffusion/60f09a193fb5e5ccdc4980417708dbab/Complex_Fold_base_ckpt.pt
+#    wget http://files.ipd.uw.edu/pub/RFdiffusion/74f51cfb8b440f50d70878e05361d8f0/InpaintSeq_ckpt.pt
+#    wget http://files.ipd.uw.edu/pub/RFdiffusion/76d00716416567174cdb7ca96e208296/InpaintSeq_Fold_ckpt.pt
+#    wget http://files.ipd.uw.edu/pub/RFdiffusion/5532d2e1f3a4738decd58b19d633b3c3/ActiveSite_ckpt.pt
+#    wget http://files.ipd.uw.edu/pub/RFdiffusion/12fc204edeae5b57713c5ad7dcb97d39/Base_epoch8_ckpt.pt
+#    wget http://files.ipd.uw.edu/pub/RFdiffusion/f572d396fae9206628714fb2ce00f72e/Complex_beta_ckpt.pt
+#    wget http://files.ipd.uw.edu/pub/RFdiffusion/1befcb9b28e2f778f53d47f18b7597fa/RF_structure_prediction_weights.pt
+
+    cd /opt/RFdiffusion/env/SE3Transformer
+    pip install --no-cache-dir -r requirements.txt
+    python setup.py install
+
+    cd /opt/RFdiffusion
+    pip install --no-cache-dir -e .
+
+    # 4. Natively build the SE(3)-Transformer from the injected local source
+#    cd /opt/se3_transformer_source
+#    pip3 install --no-cache-dir -r requirements.txt
+#    python3 setup.py install
+#    cd /
+
+    # 5. Clone and install RFdiffusion code locally
+
 
 %environment
     export LC_ALL=C
     export PATH=/opt/RFdiffusion/scripts:$PATH
-    # Direct DGL to use the native PyTorch backend out of the box
     export DGLBACKEND="pytorch"
 
 %runscript
