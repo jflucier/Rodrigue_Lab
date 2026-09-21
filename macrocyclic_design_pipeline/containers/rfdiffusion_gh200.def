@@ -1,5 +1,5 @@
 Bootstrap: docker
-From: nvcr.io/nvidia/dgl:24.06-py3
+From: nvcr.io/nvidia/dgl:24.05-py3
 
 %post
     export DEBIAN_FRONTEND=noninteractive
