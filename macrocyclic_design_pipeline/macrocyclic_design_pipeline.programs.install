@@ -1,57 +1,20 @@
 ### on GH
 
-# install rfdiffussion
+# build container on GH
+# salloc --partition=gh-bio --account=def-rodrigu1 --time=01:00:00 --gres=gpu:1 --cpus-per-task=8 --mem=30G
+# singularity build --fakeroot rfdiffusion_gh200.sif rfdiffusion_gh200.def
+
+## tests
 cd /home/jflucier/programs
 git clone https://github.com/RosettaCommons/RFdiffusion.git
 cd RFdiffusion
-mkdir models && cd models
-wget http://files.ipd.uw.edu/pub/RFdiffusion/6f5902ac237024bdd0c176cb93063dc4/Base_ckpt.pt
-wget http://files.ipd.uw.edu/pub/RFdiffusion/e29311f6f1bf1af907f9ef9f44b8328b/Complex_base_ckpt.pt
-wget http://files.ipd.uw.edu/pub/RFdiffusion/60f09a193fb5e5ccdc4980417708dbab/Complex_Fold_base_ckpt.pt
-wget http://files.ipd.uw.edu/pub/RFdiffusion/74f51cfb8b440f50d70878e05361d8f0/InpaintSeq_ckpt.pt
-wget http://files.ipd.uw.edu/pub/RFdiffusion/76d00716416567174cdb7ca96e208296/InpaintSeq_Fold_ckpt.pt
-wget http://files.ipd.uw.edu/pub/RFdiffusion/5532d2e1f3a4738decd58b19d633b3c3/ActiveSite_ckpt.pt
-wget http://files.ipd.uw.edu/pub/RFdiffusion/12fc204edeae5b57713c5ad7dcb97d39/Base_epoch8_ckpt.pt
-
-#Optional:
-wget http://files.ipd.uw.edu/pub/RFdiffusion/f572d396fae9206628714fb2ce00f72e/Complex_beta_ckpt.pt
-
-# original structure prediction weights
-wget http://files.ipd.uw.edu/pub/RFdiffusion/1befcb9b28e2f778f53d47f18b7597fa/RF_structure_prediction_weights.pt
-
-export CUDA_HOME=/usr/local/cuda-13.3
-export PATH=$CUDA_HOME/bin:$PATH
-export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH
-
-uv venv --python 3.10
-source /home/jflucier/programs/RFdiffusion/.venv/bin/activate
-
-
-#conda create -n rfdiffusion python=3.10 -y
-#conda activate rfdiffusion
-
-uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
-
-cd env/SE3Transformer
-uv pip install --no-cache-dir -r requirements.txt
-python setup.py install
-cd ../.. # change into the root directory of the repository
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
-uv pip install --force-reinstall dgl -f https://data.dgl.ai/wheels/torch-2.4/cu124/repo.html
-uv pip install torchdata==0.7.1
-uv pip install --no-deps -e . # install the rfdiffusion module from the root of the repository
-python -c "import torch; import se3_transformer; print('CUDA Available:', torch.cuda.is_available()); print('Device Name:', torch.cuda.get_device_name(0))"
-uv pip install hydra-core omegaconf icecream
-uv pip install torchdata==0.7.1
-uv pip install pandas
-uv pip install pydantic
-
-# 2. Reinstall DGL targeting the newly aligned version matrix
-# 3. Ensure torchdata stays locked at our verified data piping layout version
 
 tar -xvf examples/ppi_scaffolds_subset.tar.gz -C examples/
-source /home/jflucier/programs/RFdiffusion/.venv/bin/activate
-./scripts/run_inference.py 'contigmap.contigs=[150-150]' inference.output_prefix=test_outputs/test inference.num_designs=10
+
+singularity exec \
+-B /home/jflucier/programs/RFdiffusion:/home/jflucier/programs/RFdiffusion \
+/home/jflucier/programs/Rodrigue_Lab/macrocyclic_design_pipeline/containers/rfdiffusion_gh200.sif \
+python3 /opt/RFdiffusion/scripts/run_inference.py 'contigmap.contigs=[150-150]' inference.output_prefix=/home/jflucier/programs/RFdiffusion/examples/test_outputs/test inference.num_designs=10
 
 #For an additional example of unconditional monomer generation, take a look at ./examples/design_unconditional.sh in the repo!
 
