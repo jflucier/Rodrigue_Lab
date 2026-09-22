@@ -11,8 +11,9 @@ cd RFdiffusion
 
 tar -xvf examples/ppi_scaffolds_subset.tar.gz -C examples/
 
-singularity exec \
+singularity exec --nv \
 -B /home/jflucier/programs/RFdiffusion:/home/jflucier/programs/RFdiffusion \
+-B /home/jflucier/programs/RFdiffusion/schedules:/opt/RFdiffusion/schedules \
 /home/jflucier/programs/Rodrigue_Lab/macrocyclic_design_pipeline/containers/rfdiffusion_gh200.sif \
 python3 /opt/RFdiffusion/scripts/run_inference.py 'contigmap.contigs=[150-150]' inference.output_prefix=/home/jflucier/programs/RFdiffusion/examples/test_outputs/test inference.num_designs=10
 
