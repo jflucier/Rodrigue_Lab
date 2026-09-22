@@ -105,9 +105,12 @@ def main():
                           "explicitly whitelisted here.")
     args = ap.parse_args()
 
-    out_dir = Path(args.out_dir)
+    out_dir = Path(args.out_dir).resolve()  # Convert output directory to absolute path
     out_dir.mkdir(parents=True, exist_ok=True)
+
     out_tsv = Path(args.out_tsv) if args.out_tsv else out_dir.parent / "targets_processed.tsv"
+    out_tsv = out_tsv.resolve()  # Convert output TSV to absolute path
+
 
     with open(args.targets_tsv, newline="") as fh:
         reader = csv.DictReader(fh, delimiter="\t")
