@@ -33,7 +33,6 @@ SLURM_TEMPLATE = """#!/bin/bash
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=32G
-#SBATCH --requeue
 #SBATCH --array={array_range_str}
 {cluster_specific_headers}#SBATCH --output={abs_out_dir}/{design_name}/logs/slurm-%A_%a.out
 
