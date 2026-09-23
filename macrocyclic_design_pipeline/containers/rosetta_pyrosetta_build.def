@@ -1,49 +1,11 @@
 Bootstrap: docker
 From: ubuntu:22.04
 
-# rosetta_pyrosetta_build.def
-#
-# Builds Rosetta (C++ core + rosetta_scripts binary) and PyRosetta from
-# source, following:
-#   https://docs.rosettacommons.org/docs/latest/build_documentation/Build-Documentation
-#   https://www.pyrosetta.org/documentation  (Building PyRosetta from source)
-#
-# Built for step 3/5 of the macrocycle pipeline (FastRelax + PeptideCyclizeMover,
-# Rosetta interface metrics) as a SEPARATE container from rfdiffusion_gh200.def --
-# see the earlier note: PyRosetta does not ship prebuilt linux/aarch64 wheels, so
-# on a GH200 (aarch64) node this from-source build is the path that actually gets
-# you PyRosetta at all. Building from source is architecture-agnostic (it just
-# compiles with your platform's native compiler), but this specific combination
-# is not something RosettaCommons validates/distributes themselves -- treat it as
-# "should work" rather than "known to work," and run the %test block below (or
-# your own smoke test) before trusting it for a real campaign.
-#
-# Requires Rosetta source access: Rosetta's git repo is behind RosettaCommons'
-# free academic license (https://www.rosettacommons.org/software/license-and-download),
-# not public like RFdiffusion. You need a GitHub account with access granted to
-# RosettaCommons/rosetta, and a personal access token (classic, repo scope) for
-# that account to clone over HTTPS during the build.
-#
-# Build (from the directory containing this file):
-#   apptainer build --build-arg ROSETTA_GIT_TOKEN=<your_token> \
-#       rosetta_pyrosetta.sif rosetta_pyrosetta_build.def
-#
-# Optional build args:
-#   ROSETTA_BRANCH   git branch/tag to build (default: main)
-#   NUM_JOBS         parallel build jobs (default: 8 -- raise if you have more
-#                     cores; the C++ build in particular benefits a lot from this)
-#
-# Expect this to take HOURS (Rosetta's C++ core is large; PyRosetta's build
-# compiles it again to generate bindings). Building only bin/rosetta_scripts
-# (not the full `bin` target, which builds every Rosetta app) keeps the plain
-# Rosetta half of this reasonable; PyRosetta's build.py is still slow regardless.
+# singularity build --bind /home/jflucier/programs/rosetta:/mnt/rosetta \
+# rosetta_pyrosetta.sif rosetta_pyrosetta_build.def
 
 %arguments
     NUM_JOBS=8
-
-%files
-    # Copies your pre-downloaded local Rosetta repository directly into the container stage
-    /home/jflucier/programs/rosetta /opt/rosetta
 
 %post
     export DEBIAN_FRONTEND=noninteractive
@@ -56,6 +18,10 @@ From: ubuntu:22.04
         && rm -rf /var/lib/apt/lists/*
 
     pip3 install --no-cache-dir scons
+
+    echo "Copying Rosetta source code from bind mount..."
+    mkdir -p /opt/rosetta
+    cp -a /mnt/rosetta/. /opt/rosetta/
 
     # --- build Rosetta C++ core + rosetta_scripts --------------------------
     # Building just the rosetta_scripts binary (rather than `bin`, which
