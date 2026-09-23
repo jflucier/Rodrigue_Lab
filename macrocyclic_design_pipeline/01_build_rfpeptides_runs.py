@@ -104,7 +104,7 @@ def parse_hotspots(hotspot_str: str):
     for tok in tokens:
         if not tok:
             continue
-        chains.add(tok)
+        chains.add(tok[0])
     if len(chains) != 1:
         raise ValueError(
             f"All hotspots in one row must be on the same chain, got: {hotspot_str}"
