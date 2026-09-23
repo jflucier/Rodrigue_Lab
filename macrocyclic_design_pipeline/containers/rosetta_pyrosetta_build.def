@@ -43,6 +43,10 @@ From: ubuntu:22.04
     ROSETTA_BRANCH=main
     NUM_JOBS=8
 
+%files
+    # Copies your pre-downloaded local Rosetta repository directly into the container stage
+    /home/jflucier/programs/rosetta /opt/rosetta
+
 %post
     export DEBIAN_FRONTEND=noninteractive
 
@@ -54,24 +58,6 @@ From: ubuntu:22.04
         && rm -rf /var/lib/apt/lists/*
 
     pip3 install --no-cache-dir scons
-
-    # --- clone Rosetta source ---------------------------------------------
-    if [ -z "{{ ROSETTA_GIT_TOKEN }}" ]; then
-        echo "ERROR: ROSETTA_GIT_TOKEN build-arg not set."
-        echo "Rosetta's source is behind RosettaCommons' academic license, not public --"
-        echo "see https://www.rosettacommons.org/software/license-and-download"
-        echo "Pass a GitHub personal access token (with access to RosettaCommons/rosetta) via:"
-        echo "  apptainer build --build-arg ROSETTA_GIT_TOKEN=<token> ..."
-        exit 1
-    fi
-
-    git clone --depth 1 --branch {{ ROSETTA_BRANCH }} \
-        "https://{{ ROSETTA_GIT_TOKEN }}@github.com/RosettaCommons/rosetta.git" \
-        /opt/rosetta
-
-    # Strip .git so the token embedded in the remote URL doesn't linger in the
-    # final image (it's only needed for the clone itself).
-    rm -rf /opt/rosetta/.git
 
     # --- build Rosetta C++ core + rosetta_scripts --------------------------
     # Building just the rosetta_scripts binary (rather than `bin`, which
