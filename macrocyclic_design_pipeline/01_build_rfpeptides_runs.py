@@ -196,7 +196,7 @@ def main():
     clusterHeaders = ""
     if args.cluster == "gh":
         queue_name = args.queue
-        if queue_name is None:
+        if not queue_name:
             queue_name = "gh-preempt-low"
             print("\n" + "!" * 72)
             print("WARNING: No --queue specified for cluster 'gh'.")
