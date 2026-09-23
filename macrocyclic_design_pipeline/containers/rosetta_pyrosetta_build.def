@@ -29,7 +29,7 @@ From: ubuntu:22.04
     # builds every app in the suite) is a lot faster and is all steps
     # 03/05 of the macrocycle pipeline actually call.
     cd /opt/rosetta/source
-    ./scons.py -j{{ NUM_JOBS }} mode=release bin/rosetta_scripts
+    ./scons.py -j{{ NUM_JOBS }} mode=release rosetta_scripts
 
     # --- build PyRosetta -----------------------------------------------
     cd /opt/rosetta/source/src/python/PyRosetta
