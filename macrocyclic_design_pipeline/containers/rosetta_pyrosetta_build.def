@@ -39,8 +39,6 @@ From: ubuntu:22.04
 # Rosetta half of this reasonable; PyRosetta's build.py is still slow regardless.
 
 %arguments
-    ROSETTA_GIT_TOKEN=
-    ROSETTA_BRANCH=main
     NUM_JOBS=8
 
 %files
