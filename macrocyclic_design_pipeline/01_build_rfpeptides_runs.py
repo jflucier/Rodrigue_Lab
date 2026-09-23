@@ -33,9 +33,9 @@ SLURM_TEMPLATE = """#!/bin/bash
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=32G
+#SBATCH --requeue
 #SBATCH --array={array_range_str}
-#SBATCH --output={abs_out_dir}/{design_name}/logs/slurm-%A_%a.out
-#SBATCH --error={abs_out_dir}/{design_name}/logs/slurm-%A_%a.err
+{cluster_specific_headers}#SBATCH --output={abs_out_dir}/{design_name}/logs/slurm-%A_%a.out
 
 set -euo pipefail
 
@@ -187,7 +187,26 @@ def main():
                     help="Total targeted number of backbones desired per run profile")
     ap.add_argument("--designs-per-job", type=int, default=600,
                     help="Number of designs generated per 6-hour window allocation slice")
+    ap.add_argument("--cluster", default="", choices=["", "gh"],
+                    help="Target cluster profiling configuration ruleset selection")
+    ap.add_argument("--queue", default="",
+                    help="The partition destination queue required when --cluster=gh is set")
     args = ap.parse_args()
+
+    # Process cluster specific modifications
+    clusterHeaders = ""
+    if args.cluster == "gh":
+        queue_name = args.queue
+        if queue_name is None:
+            queue_name = "gh-preempt-low"
+            print("\n" + "!" * 72)
+            print("WARNING: No --queue specified for cluster 'gh'.")
+            print("         Defaulting to partition: 'gh-preempt-low'.")
+            print("         Your array jobs are subject to preemption on this queue.")
+            print("!" * 72 + "\n")
+
+        clusterHeaders = f"#SBATCH -p {queue_name}\n#SBATCH --requeue\n"
+
 
     out_dir = Path(args.out_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -243,6 +262,7 @@ def main():
                 total_designs=args.num_designs,
                 designs_per_task=args.designs_per_job,
                 array_range_str=array_range_str,
+                cluster_specific_headers=clusterHeaders,
                 length=length,
                 chain=chain, lo=lo, hi=hi,
                 pdb_path=str(pdb_path),
