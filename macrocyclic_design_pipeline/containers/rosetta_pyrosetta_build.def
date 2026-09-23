@@ -21,7 +21,7 @@ From: ubuntu:22.04
 
     echo "Copying Rosetta source code from bind mount..."
     mkdir -p /opt/rosetta
-    cp -a /mnt/rosetta/. /opt/rosetta/
+    cp -a /mnt/. /opt/rosetta/
 
     # --- build Rosetta C++ core + rosetta_scripts --------------------------
     # Building just the rosetta_scripts binary (rather than `bin`, which
