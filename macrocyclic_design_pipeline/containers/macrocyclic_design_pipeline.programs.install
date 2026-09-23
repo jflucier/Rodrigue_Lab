@@ -7,11 +7,11 @@ source /home/jflucier/programs/Rodrigue_Lab/.venv/bin/activate
 uv pip install biotite
 
 
-# build container on GH
+# build RF container on GH
 # salloc --partition=gh-bio --account=def-rodrigu1 --time=01:00:00 --gres=gpu:1 --cpus-per-task=8 --mem=30G
 # singularity build --fakeroot rfdiffusion_gh200.sif rfdiffusion_gh200.def
 
-## tests
+## tests RF container
 cd /home/jflucier/programs
 git clone https://github.com/RosettaCommons/RFdiffusion.git
 cd RFdiffusion
@@ -25,4 +25,21 @@ singularity exec --nv \
 python3 /opt/RFdiffusion/scripts/run_inference.py 'contigmap.contigs=[150-150]' inference.output_prefix=/home/jflucier/programs/RFdiffusion/examples/test_outputs/test inference.num_designs=10
 
 #For an additional example of unconditional monomer generation, take a look at ./examples/design_unconditional.sh in the repo!
+
+## build mpnn container
+# generate github token
+#How to Generate Your Git Token on GitHub
+# Log into GitHub and click your profile picture in the upper-right corner.
+# Click Settings.
+# Scroll down the left sidebar and click Developer settings.
+# Click Personal access tokens and select Tokens (classic)
+# Click Generate new token -> Generate new token (classic).
+# Give it a Note (e.g., "Rosetta CLI Access"), set an expiration date, and check the repo scope box.
+# Scroll to the bottom and click Generate token.
+# Important: Copy the token immediately and save it somewhere secure.
+
+salloc --partition=gh-bio --account=def-rodrigu1 --time=01:00:00 --gres=gpu:1 --cpus-per-task=8 --mem=30G
+singularity build --build-arg ROSETTA_GIT_TOKEN=<your_token> \
+rosetta_pyrosetta.sif rosetta_pyrosetta_build.def
+
 

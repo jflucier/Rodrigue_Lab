@@ -80,7 +80,12 @@ def main():
                                   formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--designs-dir", required=True)
     ap.add_argument("--out-csv", default="rosetta_scores.csv")
-    ap.add_argument("--rosetta-bin", default="rosetta_scripts.default.linuxgccrelease")
+    ap.add_argument("--rosetta-bin", default="rosetta_scripts.linuxgccrelease",
+                     help="rosetta_scripts binary name/path. Default matches a "
+                          "from-source scons build (see rosetta_pyrosetta_build.def); "
+                          "RosettaCommons' prebuilt binary bundles instead use "
+                          "rosetta_scripts.default.linuxgccrelease -- adjust if you're "
+                          "using those instead.")
     ap.add_argument("--ddg-cutoff", type=float, default=-40.0,
                      help="ddG must be less than this (more negative = better)")
     ap.add_argument("--sap-cutoff", type=float, default=35.0,

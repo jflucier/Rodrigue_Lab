@@ -1,0 +1,125 @@
+Bootstrap: docker
+From: ubuntu:22.04
+
+# rosetta_pyrosetta_build.def
+#
+# Builds Rosetta (C++ core + rosetta_scripts binary) and PyRosetta from
+# source, following:
+#   https://docs.rosettacommons.org/docs/latest/build_documentation/Build-Documentation
+#   https://www.pyrosetta.org/documentation  (Building PyRosetta from source)
+#
+# Built for step 3/5 of the macrocycle pipeline (FastRelax + PeptideCyclizeMover,
+# Rosetta interface metrics) as a SEPARATE container from rfdiffusion_gh200.def --
+# see the earlier note: PyRosetta does not ship prebuilt linux/aarch64 wheels, so
+# on a GH200 (aarch64) node this from-source build is the path that actually gets
+# you PyRosetta at all. Building from source is architecture-agnostic (it just
+# compiles with your platform's native compiler), but this specific combination
+# is not something RosettaCommons validates/distributes themselves -- treat it as
+# "should work" rather than "known to work," and run the %test block below (or
+# your own smoke test) before trusting it for a real campaign.
+#
+# Requires Rosetta source access: Rosetta's git repo is behind RosettaCommons'
+# free academic license (https://www.rosettacommons.org/software/license-and-download),
+# not public like RFdiffusion. You need a GitHub account with access granted to
+# RosettaCommons/rosetta, and a personal access token (classic, repo scope) for
+# that account to clone over HTTPS during the build.
+#
+# Build (from the directory containing this file):
+#   apptainer build --build-arg ROSETTA_GIT_TOKEN=<your_token> \
+#       rosetta_pyrosetta.sif rosetta_pyrosetta_build.def
+#
+# Optional build args:
+#   ROSETTA_BRANCH   git branch/tag to build (default: main)
+#   NUM_JOBS         parallel build jobs (default: 8 -- raise if you have more
+#                     cores; the C++ build in particular benefits a lot from this)
+#
+# Expect this to take HOURS (Rosetta's C++ core is large; PyRosetta's build
+# compiles it again to generate bindings). Building only bin/rosetta_scripts
+# (not the full `bin` target, which builds every Rosetta app) keeps the plain
+# Rosetta half of this reasonable; PyRosetta's build.py is still slow regardless.
+
+%arguments
+    ROSETTA_GIT_TOKEN=
+    ROSETTA_BRANCH=main
+    NUM_JOBS=8
+
+%post
+    export DEBIAN_FRONTEND=noninteractive
+
+    apt-get update && apt-get install -y \
+        build-essential git cmake ninja-build \
+        python3 python3-dev python3-pip \
+        zlib1g-dev libbz2-dev \
+        wget curl ca-certificates \
+        && rm -rf /var/lib/apt/lists/*
+
+    pip3 install --no-cache-dir scons
+
+    # --- clone Rosetta source ---------------------------------------------
+    if [ -z "{{ ROSETTA_GIT_TOKEN }}" ]; then
+        echo "ERROR: ROSETTA_GIT_TOKEN build-arg not set."
+        echo "Rosetta's source is behind RosettaCommons' academic license, not public --"
+        echo "see https://www.rosettacommons.org/software/license-and-download"
+        echo "Pass a GitHub personal access token (with access to RosettaCommons/rosetta) via:"
+        echo "  apptainer build --build-arg ROSETTA_GIT_TOKEN=<token> ..."
+        exit 1
+    fi
+
+    git clone --depth 1 --branch {{ ROSETTA_BRANCH }} \
+        "https://{{ ROSETTA_GIT_TOKEN }}@github.com/RosettaCommons/rosetta.git" \
+        /opt/rosetta
+
+    # Strip .git so the token embedded in the remote URL doesn't linger in the
+    # final image (it's only needed for the clone itself).
+    rm -rf /opt/rosetta/.git
+
+    # --- build Rosetta C++ core + rosetta_scripts --------------------------
+    # Building just the rosetta_scripts binary (rather than `bin`, which
+    # builds every app in the suite) is a lot faster and is all steps
+    # 03/05 of the macrocycle pipeline actually call.
+    cd /opt/rosetta/source
+    ./scons.py -j{{ NUM_JOBS }} mode=release bin/rosetta_scripts
+
+    # --- build PyRosetta -----------------------------------------------
+    cd /opt/rosetta/source/src/python/PyRosetta
+    python3 build.py -j{{ NUM_JOBS }} --create-wheel /opt/pyrosetta_wheel
+    pip3 install --no-cache-dir /opt/pyrosetta_wheel/*.whl
+
+    # Free some space: the PyRosetta build directory duplicates a full
+    # compiled copy of the C++ core inside src/python/PyRosetta/build/.
+    # Comment this out if you want to keep it around for faster incremental
+    # PyRosetta rebuilds during development.
+    rm -rf /opt/rosetta/source/src/python/PyRosetta/build/CMakeFiles
+
+%environment
+    export LC_ALL=C
+    export PATH=/opt/rosetta/source/bin:$PATH
+    export ROSETTA3_DB=/opt/rosetta/database
+    export ROSETTA3=/opt/rosetta
+
+%test
+    set -e
+    echo "=== rosetta_scripts binary ==="
+    rosetta_scripts.linuxgccrelease -help > /dev/null && echo "OK: rosetta_scripts runs"
+
+    echo "=== PyRosetta import ==="
+    python3 -c "import pyrosetta; pyrosetta.init('-mute all'); print('OK: PyRosetta', pyrosetta.__version__)"
+
+%runscript
+    exec "$@"
+
+%help
+    Rosetta (rosetta_scripts binary, release mode) + PyRosetta, built from
+    source. Used by the macrocycle pipeline's steps 3 (FastRelax +
+    PeptideCyclizeMover) and 5 (Rosetta ddG/SAP/CMS interface metrics).
+
+    Run rosetta_scripts:
+        apptainer exec rosetta_pyrosetta.sif rosetta_scripts.linuxgccrelease -parser:protocol my.xml ...
+
+    Run a PyRosetta script:
+        apptainer exec rosetta_pyrosetta.sif python3 my_relax_script.py
+
+    Note the binary name has no ".default" infix (that's specific to
+    RosettaCommons' prebuilt binary bundles) -- it's
+    rosetta_scripts.linuxgccrelease here, not rosetta_scripts.default.linuxgccrelease.
+    Update --rosetta-bin in scripts/05_rosetta_filter.py accordingly.
