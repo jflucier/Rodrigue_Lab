@@ -44,7 +44,7 @@ git clone https://<YOUR_TOKEN>@://github.com/RosettaCommons/rosetta.git
 cd rosetta
 git submodule update --init --recursive
 
-singularity build \
+singularity build --fakeroot \
 rosetta_pyrosetta.sif rosetta_pyrosetta_build.def
 
 
