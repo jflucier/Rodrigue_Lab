@@ -10,13 +10,12 @@ From: ubuntu:22.04
 %post
     export DEBIAN_FRONTEND=noninteractive
 
-    # --- WORKAROUND: Sabotage the openssh-client post-install hook ---
-    # This prevents the container from trying to invoke groupadd on /etc/group
-    mkdir -p /var/lib/dpkg/info
-    echo "#!/bin/sh" > /var/lib/dpkg/info/openssh-client.postinst
-    echo "exit 0" >> /var/lib/dpkg/info/openssh-client.postinst
-    chmod +x /var/lib/dpkg/info/openssh-client.postinst
-
+    # --- THE ABSOLUTE BYPASS: Divert groupadd to /bin/true ----------------
+    # This prevents any apt package (now or during updates) from trying
+    # to modify /etc/group under your restricted environment.
+    rm -f /sbin/groupadd /usr/sbin/groupadd
+    ln -sf /bin/true /sbin/groupadd
+    ln -sf /bin/true /usr/sbin/groupadd
 
     apt-get update && apt-get install -y \
         build-essential git cmake ninja-build \
