@@ -44,7 +44,10 @@ git clone https://<YOUR_TOKEN>@://github.com/RosettaCommons/rosetta.git
 cd rosetta
 git submodule update --init --recursive
 
+salloc --partition=gh-bio --account=def-rodrigu1 --time=10:00:00 --gres=gpu:1 --cpus-per-task=16 --mem=100G
 singularity build --fakeroot \
+--build-arg NUM_JOBS=16 \
+--bind /home/jflucier/programs/rosetta:/mnt \
 rosetta_pyrosetta.sif rosetta_pyrosetta_build.def
 
 
