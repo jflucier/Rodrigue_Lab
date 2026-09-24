@@ -10,6 +10,11 @@ From: ubuntu:22.04
 %post
     export DEBIAN_FRONTEND=noninteractive
 
+    # --- THE SYSTEM TRICK: Manually seed the _ssh group ---
+    # This directly provides the group ID so that chgrp doesn't crash,
+    # bypassing the broken groupadd tool entirely.
+    echo "_ssh:x:101:" >> /etc/group
+
     # --- THE ABSOLUTE BYPASS: Divert groupadd to /bin/true ----------------
     # This prevents any apt package (now or during updates) from trying
     # to modify /etc/group under your restricted environment.
