@@ -1,0 +1,23 @@
+Bootstrap: localimage
+From: ./rosetta_pyrosetta.sif
+
+%post
+    export DEBIAN_FRONTEND=noninteractive
+
+    # Install PyTorch (CPU version is standard for portability, or omit --extra-index-url for GPU)
+    pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu126
+
+    # Download ProteinMPNN into /opt
+    mkdir -p /opt/proteinmpnn
+    git clone https://github.com/dauparas/ProteinMPNN.git /opt/proteinmpnn
+
+%environment
+    export PATH=/opt/proteinmpnn:$PATH
+
+%test
+    echo "=== Testing ProteinMPNN ==="
+    python3 -c "import torch; print('Torch available:', torch.__version__)"
+    python3 /opt/proteinmpnn/protein_mpnn_run.py --help > /dev/null && echo "OK: ProteinMPNN script works!"
+
+
+
