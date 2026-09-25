@@ -4,6 +4,10 @@ From: ./rosetta_pyrosetta.clean.sif
 %post
     export DEBIAN_FRONTEND=noninteractive
 
+    # --- Install git on the fly so we can clone ProteinMPNN ---
+    apt-get update && apt-get install -y git
+    rm -rf /var/lib/apt/lists/*
+
     # Install PyTorch (CPU version is standard for portability, or omit --extra-index-url for GPU)
     pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu126
 

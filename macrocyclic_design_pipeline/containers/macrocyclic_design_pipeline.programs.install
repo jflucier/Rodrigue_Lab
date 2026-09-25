@@ -51,4 +51,5 @@ singularity build --fakeroot \
 rosetta_pyrosetta.sif rosetta_pyrosetta_build.def
 
 # build mpnn image
+singularity build --fakeroot proteinmpnn.sif proteinmpnn.def
 
