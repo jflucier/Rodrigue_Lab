@@ -86,34 +86,34 @@ MPNN_WEIGHTS="/opt/proteinmpnn/vanilla_model_weights/v_48_020.pt"
 CURRENT_PDB="__PDB_ABSOLUTE__"
 
 for rnd in $(seq 1 __N_ROUNDS__); do
-    ROUND_DIR="__OUT_PATH__/__STEM__/round\${rnd}"
-    mkdir -p "\${ROUND_DIR}"
+    ROUND_DIR="__OUT_PATH__/__STEM__/round${rnd}"
+    mkdir -p "${ROUND_DIR}"
 
-    echo "[__STEM__] === Round \${rnd} === Running ProteinMPNN"
+    echo "[__STEM__] === Round ${rnd} === Running ProteinMPNN"
     singularity exec --nv --pwd /tmp -B __BIND_PATH__ \
         __MPNN_SIF__ \
-        python3 "\${MPNN_SCRIPT}" \
-        --pdb_path "\${CURRENT_PDB}" \
+        python3 "${MPNN_SCRIPT}" \
+        --pdb_path "${CURRENT_PDB}" \
         --pdb_path_chains "A" \
         --temperature "0.0001" \
         --backbone_noise "0" \
         --omit_AAs "C" \
         --num_seq_per_target 1 \
-        --path_to_model_weights "\${MPNN_WEIGHTS}" \
-        --out_folder "\${ROUND_DIR}"
+        --path_to_model_weights "${MPNN_WEIGHTS}" \
+        --out_folder "${ROUND_DIR}"
 
-    MPNN_OUT=\$(find "\${ROUND_DIR}/seqs" -name "*.fa" | head -n 1)
-    if [ -z "\${MPNN_OUT}" ]; then
-        echo "[WARN] No ProteinMPNN output found for __STEM__ round \${rnd}, breaking chain loops."
+    MPNN_OUT=$(find "${ROUND_DIR}/seqs" -name "*.fa" | head -n 1)
+    if [ -z "${MPNN_OUT}" ]; then
+        echo "[WARN] No ProteinMPNN output found for __STEM__ round ${rnd}, breaking chain loops."
         break
     fi
 
-    echo "[__STEM__] === Round \${rnd} === Running PyRosetta FastRelax"
-    RELAXED_PDB="\${ROUND_DIR}/__STEM___r\${rnd}.pdb"
-    TMP_SCRIPT="\${ROUND_DIR}/__STEM___r\${rnd}.relax.py"
+    echo "[__STEM__] === Round ${rnd} === Running PyRosetta FastRelax"
+    RELAXED_PDB="${ROUND_DIR}/__STEM___r${rnd}.pdb"
+    TMP_SCRIPT="${ROUND_DIR}/__STEM___r${rnd}.relax.py"
 
     # Write out separate python runtime script
-    cat << 'EOF' > "\${TMP_SCRIPT}"
+    cat << 'EOF' > "${TMP_SCRIPT}"
 from pyrosetta import *
 init('-beta_nov16 -mute all')
 
@@ -122,20 +122,20 @@ objs = protocols.rosetta_scripts.XmlObjects.create_from_file(xml)
 fr = objs.get_mover('full_relax_complex')
 pcm = objs.get_mover('pcm')
 
-pose = pose_from_pdb('\${CURRENT_PDB}')
+pose = pose_from_pdb('${CURRENT_PDB}')
 pcm.apply(pose)
 fr.apply(pose)
 pcm.apply(pose)
-pose.dump_pdb('\${RELAXED_PDB}')
+pose.dump_pdb('${RELAXED_PDB}')
 EOF
 
     # Run PyRosetta within container
     singularity exec --nv --pwd /tmp -B __BIND_PATH__ \
         __MPNN_SIF__ \
-        python3 "\${TMP_SCRIPT}"
+        python3 "${TMP_SCRIPT}"
 
     # Advance pointer state
-    CURRENT_PDB="\${RELAXED_PDB}"
+    CURRENT_PDB="${RELAXED_PDB}"
 done
 """
         # Precise text replacement maps parameters into place with no escaping anomalies
