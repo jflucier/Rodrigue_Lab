@@ -21,8 +21,8 @@ def main():
     ap.add_argument("--n-rounds", type=int, default=4)
     ap.add_argument("--max-backbones", type=int, default=None,
                     help="Maximum number of backbone structures to process (Default: process all)")
-    ap.add_argument("-p", "--partition", default="gh-bio",
-                    help="The target cluster partition to submit the job to (Default: gh-bio)")
+    ap.add_argument("--queue", default="gh-bio",
+                    help="The partition destination queue")
     ap.add_argument("--bind-path", default="/net/nfs-ip34",
                     help="Absolute host path to bind mount into the container (Default: /net/nfs-ip34)")
     args = ap.parse_args()
@@ -52,7 +52,7 @@ def main():
     # =============================================================================
     slurm_content = f"""#!/bin/bash
 #SBATCH --job-name=macrocycle_pipeline
-#SBATCH --partition={args.partition}
+#SBATCH --partition={args.queue}
 #SBATCH --output={out_path}/logs/pipeline_%j.log
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -159,7 +159,7 @@ done
     print(" SLURM BATCH SCRIPT GENERATION COMPLETE")
     print("=" * 80)
     print(f"File saved to: {slurm_script_path}")
-    print(f"Target Partition: {args.partition}")
+    print(f"Target Queue: {args.queue}")
     print(f"Total Backbones Scaled into Job: {len(pdbs)}")
     print("\nTo submit this job to your cluster queue, execute the following command:")
     print(f"sbatch {slurm_script_path}")
