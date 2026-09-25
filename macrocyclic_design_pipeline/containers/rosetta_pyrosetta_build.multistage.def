@@ -1,0 +1,92 @@
+# =============================================================================
+# STAGE 1: Compilation & Installation (The Heavy Worker Stage)
+# =============================================================================
+Bootstrap: docker
+From: ubuntu:22.04
+Stage: devel
+
+%arguments
+    NUM_JOBS=8
+
+%post
+    export DEBIAN_FRONTEND=noninteractive
+
+    # --- System Permissions Workaround ---
+    echo "_ssh:x:101:" >> /etc/group
+    rm -f /sbin/groupadd /usr/sbin/groupadd
+    ln -sf /bin/true /sbin/groupadd
+    ln -sf /bin/true /usr/sbin/groupadd
+
+    # --- Install System Packages ---
+    apt-get update && apt-get install -y \
+        build-essential git cmake ninja-build \
+        clang llvm \
+        python3 python3-dev python3-pip python-is-python3 \
+        zlib1g-dev libbz2-dev \
+        wget curl ca-certificates
+    rm -rf /var/lib/apt/lists/*
+
+    # --- Copy Rosetta Source ---
+    mkdir -p /opt/rosetta
+    cp -a /mnt/. /opt/rosetta/
+
+    pip3 install --no-cache-dir scons
+
+    # --- Build Rosetta C++ Core ---
+    cd /opt/rosetta/source
+    ./scons.py -j{{ NUM_JOBS }} mode=release rosetta_scripts
+
+    # --- Build and Install PyRosetta ---
+    cd /opt/rosetta/source/src/python/PyRosetta
+    export CC=clang
+    export CXX=clang++
+    python3 build.py -j{{ NUM_JOBS }} --create-wheel /opt/pyrosetta_wheel
+    pip3 install --no-cache-dir /opt/pyrosetta_wheel/*.whl
+
+    # --- Surgical Strip to reduce size before copying ---
+    if [ -f "/opt/rosetta/source/bin/rosetta_scripts.linuxgccrelease" ]; then
+        strip --strip-unneeded /opt/rosetta/source/bin/rosetta_scripts.linuxgccrelease
+    fi
+    find /usr/local/lib/python3.10/dist-packages/pyrosetta/ -name "*.so" -exec strip --strip-unneeded {} + 2>/dev/null || true
+
+
+# =============================================================================
+# STAGE 2: Deployment (The Production Stage - Only Final Files Copied Here)
+# =============================================================================
+Bootstrap: docker
+From: ubuntu:22.04
+Stage: deploy
+
+%post
+    export DEBIAN_FRONTEND=noninteractive
+
+    # Install only minimal production dependencies needed to run the software
+    apt-get update && apt-get install -y \
+        python3 python3-pip python-is-python3 \
+        zlib1g-dev libbz2-dev \
+        libgomp1 \
+        ca-certificates
+    rm -rf /var/lib/apt/lists/*
+
+%files from devel
+    # Only copy the final compiled application directories from Stage 1 [1]
+    /opt/rosetta/source/bin /opt/rosetta/source/bin
+    /opt/rosetta/database /opt/rosetta/database
+    /usr/local/lib/python3.10/dist-packages /usr/local/lib/python3.10/dist-packages
+
+%environment
+    export LC_ALL=C
+    export PATH=/opt/rosetta/source/bin:$PATH
+    export ROSETTA3_DB=/opt/rosetta/database
+    export ROSETTA3=/opt/rosetta
+
+%test
+    set -e
+    echo "=== rosetta_scripts binary ==="
+    /opt/rosetta/source/bin/rosetta_scripts.linuxgccrelease -help > /dev/null && echo "OK: rosetta_scripts runs"
+
+    echo "=== PyRosetta import ==="
+    python3 -c "import pyrosetta; pyrosetta.init('-mute all'); print('OK: PyRosetta version:', pyrosetta.version())"
+
+%runscript
+    exec "$@"

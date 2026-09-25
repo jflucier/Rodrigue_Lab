@@ -50,4 +50,8 @@ singularity build --fakeroot \
 --bind /home/jflucier/programs/rosetta:/mnt \
 rosetta_pyrosetta.sif rosetta_pyrosetta_build.def
 
+#reduce image size
+apptainer build --sandbox temporary_sandbox/ rosetta_pyrosetta.sif
+apptainer build rosetta_pyrosetta_clean.sif temporary_sandbox/
+rm -rf temporary_sandbox/
 
