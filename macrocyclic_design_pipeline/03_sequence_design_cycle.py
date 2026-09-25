@@ -51,7 +51,6 @@ def main():
     slurm_content = f"""#!/bin/bash
 #SBATCH --job-name=macrocycle_pipeline
 #SBATCH --output={out_path}/logs/pipeline_%j.log
-#SBATCH --error={out_path}/logs/pipeline_%j.err
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --gres=gpu:1
@@ -80,7 +79,7 @@ MPNN_WEIGHTS="/opt/proteinmpnn/vanilla_model_weights/v_48_020.pt"
 # -----------------------------------------------------------------------------
 CURRENT_PDB="{pdb_absolute}"
 
-for rnd in \$(seq 1 {args.n_rounds}); do
+for rnd in $(seq 1 {args.n_rounds}); do
     ROUND_DIR="{out_path}/{stem}/round\${{rnd}}"
     mkdir -p "\${{ROUND_DIR}}"
 
