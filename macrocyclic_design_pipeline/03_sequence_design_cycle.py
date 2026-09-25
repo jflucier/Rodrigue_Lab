@@ -68,7 +68,7 @@ echo "Running on node: \$(hostname)"
 
 # Internal container paths
 MPNN_SCRIPT="/opt/proteinmpnn/protein_mpnn_run.py"
-MPNN_WEIGHTS="/opt/proteinmpnn/vanilla_model_weights/v_48_020.pt"
+MPNN_WEIGHTS="/opt/proteinmpnn/vanilla_model_weights"
 """
 
     # =============================================================================
