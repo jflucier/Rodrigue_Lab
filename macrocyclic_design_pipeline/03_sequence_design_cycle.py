@@ -137,7 +137,7 @@ fr = objs.get_mover('full_relax_complex')
 pcm = objs.get_mover('pcm')
 
 # 2. Parse the designed sequence from the ProteinMPNN FASTA output
-mpnn_fasta_path = ${MPNN_OUT}
+mpnn_fasta_path = "${MPNN_OUT}"
 design_seq = ""
 with open(mpnn_fasta_path, 'r') as f:
     lines = f.readlines()
