@@ -119,8 +119,9 @@ import pyrosetta.rosetta.protocols.rosetta_scripts as rosetta_scripts
 
 init('-beta_nov16 -mute all')
 
+# 1. Load the core XML structures
 xml = '__XML_PATH__'
-objs = protocols.rosetta_scripts.XmlObjects.create_from_file(xml)
+objs = rosetta_scripts.XmlObjects.create_from_file(xml)
 fr = objs.get_mover('full_relax_complex')
 pcm = objs.get_mover('pcm')
 
