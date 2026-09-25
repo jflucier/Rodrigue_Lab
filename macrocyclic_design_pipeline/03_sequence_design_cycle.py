@@ -115,6 +115,8 @@ for rnd in $(seq 1 __N_ROUNDS__); do
     # Write out separate python runtime script
     cat << 'EOF' > "${TMP_SCRIPT}"
 from pyrosetta import *
+import pyrosetta.protocols.rosetta_scripts as rosetta_scripts
+
 init('-beta_nov16 -mute all')
 
 xml = '__XML_PATH__'
