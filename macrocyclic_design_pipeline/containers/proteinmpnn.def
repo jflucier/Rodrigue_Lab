@@ -1,5 +1,5 @@
 Bootstrap: localimage
-From: ./rosetta_pyrosetta.sif
+From: ./rosetta_pyrosetta.clean.sif
 
 %post
     export DEBIAN_FRONTEND=noninteractive

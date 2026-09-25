@@ -12,12 +12,14 @@ captions):
     GABARAP: ddG < -30 kcal/mol, SAP < 35, CMS > 300 A^2
     RbtA:    ddG < -40 kcal/mol, SAP < 35, CMS > 300 A^2
 
-Requires a Rosetta build with rosetta_scripts on PATH (or pass --rosetta-bin).
+Runs via an Apptainer container (built per rosetta_pyrosetta_build.def),
+e.g. .../containers/final_rosetta_pyrosetta.sif.
 
 Usage:
     python 05_rosetta_filter.py \
         --designs-dir afcyc_passing/ \
         --out-csv rosetta_scores.csv \
+        --rosetta-sif /home/jflucier/programs/Rodrigue_Lab/macrocyclic_design_pipeline/containers/final_rosetta_pyrosetta.sif \
         --ddg-cutoff -40 --sap-cutoff 35 --cms-cutoff 300
 """
 import argparse
@@ -28,10 +30,21 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-INTERFACE_XML = HERE.parent / "rosetta" / "interface_metrics.xml"
+REPO_ROOT = HERE.parent
+INTERFACE_XML = REPO_ROOT / "rosetta" / "interface_metrics.xml"
 
 
-def run_rosetta_scripts(rosetta_bin, pdb_path, out_dir):
+def apptainer_exec(sif_path, cmd, binds):
+    bind_paths = sorted({str(Path(b).resolve()) for b in binds})
+    full_cmd = ["apptainer", "exec"]
+    if bind_paths:
+        full_cmd += ["--bind", ",".join(bind_paths)]
+    full_cmd.append(str(sif_path))
+    full_cmd += cmd
+    return full_cmd
+
+
+def run_rosetta_scripts(rosetta_sif, rosetta_bin, pdb_path, out_dir):
     cmd = [
         rosetta_bin,
         "-parser:protocol", str(INTERFACE_XML),
@@ -40,7 +53,11 @@ def run_rosetta_scripts(rosetta_bin, pdb_path, out_dir):
         "-out:file:scorefile", "score.sc",
         "-overwrite",
     ]
-    subprocess.run(cmd, check=True, capture_output=True, text=True)
+    full_cmd = apptainer_exec(
+        rosetta_sif, cmd,
+        binds=[REPO_ROOT, Path(pdb_path).parent, out_dir],
+    )
+    subprocess.run(full_cmd, check=True, capture_output=True, text=True)
 
 
 def parse_score_file(score_sc: Path, design_name: str):
@@ -80,12 +97,14 @@ def main():
                                   formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--designs-dir", required=True)
     ap.add_argument("--out-csv", default="rosetta_scores.csv")
+    ap.add_argument("--rosetta-sif", required=True,
+                     help="Path to final_rosetta_pyrosetta.sif")
     ap.add_argument("--rosetta-bin", default="rosetta_scripts.linuxgccrelease",
-                     help="rosetta_scripts binary name/path. Default matches a "
-                          "from-source scons build (see rosetta_pyrosetta_build.def); "
-                          "RosettaCommons' prebuilt binary bundles instead use "
-                          "rosetta_scripts.default.linuxgccrelease -- adjust if you're "
-                          "using those instead.")
+                     help="rosetta_scripts binary name INSIDE the container. Default "
+                          "matches a from-source scons build (see "
+                          "rosetta_pyrosetta_build.def); RosettaCommons' prebuilt "
+                          "binary bundles instead use "
+                          "rosetta_scripts.default.linuxgccrelease.")
     ap.add_argument("--ddg-cutoff", type=float, default=-40.0,
                      help="ddG must be less than this (more negative = better)")
     ap.add_argument("--sap-cutoff", type=float, default=35.0,
@@ -107,7 +126,7 @@ def main():
         pdb_work_dir = work_dir / pdb.stem
         pdb_work_dir.mkdir(exist_ok=True)
         try:
-            run_rosetta_scripts(args.rosetta_bin, pdb, pdb_work_dir)
+            run_rosetta_scripts(args.rosetta_sif, args.rosetta_bin, pdb, pdb_work_dir)
             metrics = parse_score_file(pdb_work_dir / "score.sc", pdb.stem)
         except Exception as e:
             print(f"[warn] {pdb.name}: rosetta run/parse failed ({e})")
