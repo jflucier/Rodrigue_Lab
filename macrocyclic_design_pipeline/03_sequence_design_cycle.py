@@ -23,8 +23,8 @@ def main():
                     help="Maximum number of backbone structures to process (Default: process all)")
     ap.add_argument("--queue", default="gh-bio",
                     help="The partition destination queue")
-    ap.add_argument("--bind-path", default="/net/nfs-ip34",
-                    help="Absolute host path to bind mount into the container (Default: /net/nfs-ip34)")
+    ap.add_argument("--bind-path", default="/net/nfs-bio",
+                    help="Absolute host path to bind mount into the container (Default: /net/nfs-bio)")
     args = ap.parse_args()
 
     # Resolve absolute physical paths to prevent cluster symlink errors
