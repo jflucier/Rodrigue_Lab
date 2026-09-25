@@ -43,12 +43,23 @@ def main():
         pdbs = pdbs[:args.max_backbones]
         print(f"Capping design generation queue to the first {len(pdbs)} backbone structures.")
 
-    # Build internal path variables
-    slurm_script_path = out_path / "run_pipeline_job.slurm"
+    # =============================================================================
+    # DEPLOY YOUR NATURE CHEM BIOL XML PROTOCOL TO THE RUN DIRECTORY
+    # =============================================================================
+    source_xml = Path(__file__).resolve().parent / "fast_relax_cyclize.xml"
     fast_relax_xml = out_path / "fast_relax_cyclize.xml"
 
+    if not source_xml.exists():
+        sys.exit(f"CRITICAL ERROR: Could not locate template XML source file at: {source_xml}")
+
+    print(f"Deploying paper XML protocol file to destination folder: {fast_relax_xml}")
+    fast_relax_xml.write_text(source_xml.read_text())
+
+    # Build internal path variables
+    slurm_script_path = out_path / "run_pipeline_job.slurm"
+
     # =============================================================================
-    # GENERATE THE .SLURM SCRIPT HEADERS (Using standard f-string for args injection)
+    # GENERATE THE .SLURM SCRIPT HEADERS
     # =============================================================================
     slurm_content = f"""#!/bin/bash
 #SBATCH --job-name=macrocycle_pipeline
@@ -125,10 +136,35 @@ objs = rosetta_scripts.XmlObjects.create_from_file(xml)
 fr = objs.get_mover('full_relax_complex')
 pcm = objs.get_mover('pcm')
 
+# 2. Parse the designed sequence from the ProteinMPNN FASTA output
+mpnn_fasta_path = '${MPNN_OUT}'
+design_seq = ""
+with open(mpnn_fasta_path, 'r') as f:
+    lines = f.readlines()
+    if len(lines) >= 2:
+        design_seq = lines[-1].strip()
+
+if not design_seq:
+    raise ValueError(f"Could not parse valid sequence array out of {mpnn_fasta_path}")
+
+# 3. Load target backbone coordinate frame
 pose = pose_from_pdb('${CURRENT_PDB}')
+
+# 4. Thread the custom sequence onto Chain A (the macrocycle)
+print(f"Threading ProteinMPNN sequence onto Chain A: {design_seq}")
+mutator = rosetta.protocols.simple_moves.MutateResidue()
+for i, aa in enumerate(design_seq):
+    pose_res_idx = i + 1  # PyRosetta utilizes 1-based indexing
+    mutator.set_target(pose_res_idx)
+    mutator.set_res_name(aa)
+    mutator.apply(pose)
+
+# 5. Enforce rings geometry closure and relax complex using Paper constraints
 pcm.apply(pose)
 fr.apply(pose)
 pcm.apply(pose)
+
+# Save result state
 pose.dump_pdb('${RELAXED_PDB}')
 EOF
 
