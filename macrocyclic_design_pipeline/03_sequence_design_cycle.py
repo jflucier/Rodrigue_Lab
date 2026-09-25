@@ -45,7 +45,7 @@ def main():
 
     # Build internal path variables
     slurm_script_path = out_path / "run_pipeline_job.slurm"
-    fast_relax_xml = Path(__file__).resolve().parent / "rosetta" / "fast_relax_cyclize.xml"
+    fast_relax_xml = out_path / "fast_relax_cyclize.xml"
 
     # =============================================================================
     # GENERATE THE .SLURM SCRIPT HEADERS (Using standard f-string for args injection)
