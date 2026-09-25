@@ -127,6 +127,7 @@ for rnd in $(seq 1 __N_ROUNDS__); do
     cat << 'EOF' > "${TMP_SCRIPT}"
 from pyrosetta import *
 import pyrosetta.rosetta.protocols.rosetta_scripts as rosetta_scripts
+import glob
 
 init('-beta_nov16 -mute all')
 
@@ -137,7 +138,14 @@ fr = objs.get_mover('full_relax_complex')
 pcm = objs.get_mover('pcm')
 
 # 2. Parse the designed sequence from the ProteinMPNN FASTA output
-mpnn_fasta_path = "${MPNN_OUT}"
+round_dir = '__ROUND_DIR_PATH__'
+fa_matches = glob.glob(f"{round_dir}/seqs/*.fa")
+
+if not fa_matches:
+    raise FileNotFoundError(f"Could not find any ProteinMPNN FASTA output files inside {round_dir}/seqs/")
+
+mpnn_fasta_path = fa_matches[0]
+
 design_seq = ""
 with open(mpnn_fasta_path, 'r') as f:
     lines = f.readlines()
