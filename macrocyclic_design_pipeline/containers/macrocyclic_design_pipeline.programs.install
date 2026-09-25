@@ -50,6 +50,25 @@ singularity build --fakeroot \
 --bind /home/jflucier/programs/rosetta:/mnt \
 rosetta_pyrosetta.sif rosetta_pyrosetta_build.def
 
-# build mpnn image
+# build mpnn
 singularity build --fakeroot proteinmpnn.sif proteinmpnn.def
+# test
+folder_with_pdbs="/opt/proteinmpnn/inputs/PDB_monomers/pdbs/"
+output_dir="/net/nfs-ip34/fast2/def-rodrigu1/20260916_peptide_macrocyclic/mpnn_test_results"
+path_for_parsed_chains=$output_dir"/parsed_pdbs.jsonl"
 
+singularity exec --nv \
+-B /net/nfs-ip34 \
+/home/jflucier/programs/Rodrigue_Lab/macrocyclic_design_pipeline/containers/proteinmpnn.sif \
+python3 /opt/proteinmpnn/helper_scripts/parse_multiple_chains.py --input_path=$folder_with_pdbs --output_path=$path_for_parsed_chains
+
+singularity exec --nv \
+-B /net/nfs-ip34 \
+/home/jflucier/programs/Rodrigue_Lab/macrocyclic_design_pipeline/containers/proteinmpnn.sif \
+python3 /opt/proteinmpnn/protein_mpnn_run.py \
+        --jsonl_path $path_for_parsed_chains \
+        --out_folder $output_dir \
+        --num_seq_per_target 2 \
+        --sampling_temp "0.1" \
+        --seed 37 \
+        --batch_size 1
