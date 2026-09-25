@@ -2,11 +2,12 @@
 """
 03_sequence_design_cycle.py
 
-Generates and submits an optimized SLURM batch script to run the
-ProteinMPNN -> PyRosetta iterative macrocycle pipeline on a GPU node.
+Generates an optimized SLURM batch script to run the
+ProteinMPNN -> PyRosetta iterative macrocycle pipeline on a GPU node,
+and prints out the terminal command required to run it.
+Uses a single combined container file holding both software stacks.
 """
 import argparse
-import subprocess
 import sys
 from pathlib import Path
 
@@ -15,8 +16,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--backbones-dir", required=True)
     ap.add_argument("--out-dir", required=True)
-    ap.add_argument("--proteinmpnn-sif", required=True)
-    ap.add_argument("--rosetta-sif", required=True)
+    ap.add_argument("--proteinmpnn-sif", required=True,
+                    help="Path to the combined SIF file containing both ProteinMPNN and PyRosetta")
     ap.add_argument("--n-rounds", type=int, default=4)
     ap.add_argument("--bind-path", default="/net/nfs-ip34",
                     help="Absolute host path to bind mount into the container (Default: /net/nfs-ip34)")
@@ -66,6 +67,8 @@ MPNN_WEIGHTS="/opt/proteinmpnn/vanilla_model_weights/v_48_020.pt"
         pdb_absolute = pdb.resolve()
         stem = pdb.stem
 
+        # Using triple curly braces (e.g. ${{{var}}}) inside Python f-strings
+        # outputs a literal clean standard bash variable syntax: ${var}
         slurm_content += f"""
 # -----------------------------------------------------------------------------
 # Backbone: {stem}
@@ -90,7 +93,7 @@ for rnd in $(seq 1 {args.n_rounds}); do
         --out_folder "${{ROUND_DIR}}"
 
     MPNN_OUT=$(find "${{ROUND_DIR}}/seqs" -name "*.fa" | head -n 1)
-    if [ -z "$MPNN_OUT" ]; then
+    if [ -z "${{MPNN_OUT}}" ]; then
         echo "[WARN] No ProteinMPNN output found for {stem} round ${{rnd}}, breaking chain loops."
         break
     fi
@@ -117,18 +120,14 @@ pose.dump_pdb('${{RELAXED_PDB}}')
 EOF
 
     # Run PyRosetta within container
-    singularity exec --pwd /tmp -B {args.bind_path} \\
-        {args.rosetta_sif} \\
+    singularity exec --nv --pwd /tmp -B {args.bind_path} \\
+        {args.proteinmpnn_sif} \\
         python3 "${{TMP_SCRIPT}}"
 
     # Advance pointer state
     CURRENT_PDB="${{RELAXED_PDB}}"
 done
 """
-
-    # Save script text out to disk storage
-    slurm_script_path.write_text(slurm_content)
-    print(f"Generated SLURM file successfully at: {slurm_script_path}")
 
     # Save script text out to disk storage
     slurm_script_path.write_text(slurm_content)
@@ -143,8 +142,6 @@ done
     print("\nTo submit this job to your cluster queue, execute the following command:")
     print(f"sbatch {slurm_script_path}")
     print("=" * 80 + "\n")
-
-    print(result.stdout.strip())
 
 
 if __name__ == "__main__":
