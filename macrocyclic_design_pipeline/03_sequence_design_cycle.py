@@ -95,7 +95,7 @@ for rnd in $(seq 1 __N_ROUNDS__); do
         python3 "${MPNN_SCRIPT}" \
         --pdb_path "${CURRENT_PDB}" \
         --pdb_path_chains "A" \
-        --temperature "0.0001" \
+        --sampling_temp "0.0001" \
         --backbone_noise "0" \
         --omit_AAs "C" \
         --num_seq_per_target 1 \
