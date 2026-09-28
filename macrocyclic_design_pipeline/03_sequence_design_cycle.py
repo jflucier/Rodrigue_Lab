@@ -124,10 +124,10 @@ for rnd in $(seq 1 __N_ROUNDS__); do
     TMP_SCRIPT="${ROUND_DIR}/__STEM___r${rnd}.relax.py"
 
     # Define paths dynamically using standard bash echo commands to bypass cat EOF limits
-    echo "round_dir = \"${ROUND_DIR}\"" > "${TMP_SCRIPT}"
-    echo "mpnn_fasta_path = \"${MPNN_OUT}\"" >> "${TMP_SCRIPT}"
-    echo "current_pdb_path = \"${CURRENT_PDB}\"" >> "${TMP_SCRIPT}"
-    echo "relaxed_pdb_path = \"${RELAXED_PDB}\"" >> "${TMP_SCRIPT}"
+    echo "round_dir = '${ROUND_DIR}'" > "${TMP_SCRIPT}"
+    echo "mpnn_fasta_path = '${MPNN_OUT}'" >> "${TMP_SCRIPT}"
+    echo "current_pdb_path = '${CURRENT_PDB}'" >> "${TMP_SCRIPT}"
+    echo "relaxed_pdb_path = '${RELAXED_PDB}'" >> "${TMP_SCRIPT}"
 
     # Write out separate python runtime script
     cat << 'EOF' >> "${TMP_SCRIPT}"
