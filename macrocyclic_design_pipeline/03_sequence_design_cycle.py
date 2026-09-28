@@ -178,6 +178,12 @@ sys.stdout.flush()
 p_info = pose.pdb_info()
 mutator = rosetta.protocols.simple_moves.MutateResidue()
 
+# Dynamically calculate the exact number of residues present on Chain A
+chain_A_resnums = rosetta.core.pose.get_resnums_for_chain(pose, 'A')
+max_chain_A_len = len(chain_A_resnums)
+print("Detected Chain A (macrocycle) length: " + str(max_chain_A_len) + " residues.")
+sys.stdout.flush()
+
 aa_1to3 = {
     'A': 'ALA', 'C': 'CYS', 'D': 'ASP', 'E': 'GLU', 'F': 'PHE',
     'G': 'GLY', 'H': 'HIS', 'I': 'ILE', 'K': 'LYS', 'L': 'LEU',
@@ -189,6 +195,12 @@ for i, aa in enumerate(design_seq):
     # Convert PDB string coordinates (e.g., residue 1 on Chain 'A') 
     # directly to PyRosetta's internal structural index number
     pdb_res_num = i + 1
+    
+    if pdb_res_num > max_chain_A_len:
+        print("Finished threading Chain A. Ignoring remaining target protein sequence data.")
+        sys.stdout.flush()
+        break
+    
     pose_res_idx = p_info.pdb2pose('A', pdb_res_num)
     
     # Safety Check: Confirm this residue actually exists on Chain A inside the PDB layout
@@ -205,10 +217,6 @@ for i, aa in enumerate(design_seq):
     print(f" -> Position PDB:{pdb_res_num} (Pose:{pose_res_idx}) AA:{aa} AA3:{aa_3letter}")
     sys.stdout.flush()
     
-    # Safety Check: Confirm this residue actually exists on Chain A inside the PDB layout
-    if pose_res_idx == 0:
-        raise IndexError(f"CRITICAL: Residue {pdb_res_num} on Chain A does not map to any valid position in this PDB complex structure!")
-        
     mutator.set_target(pose_res_idx)
     mutator.set_res_name(aa_3letter)
     mutator.apply(pose)
