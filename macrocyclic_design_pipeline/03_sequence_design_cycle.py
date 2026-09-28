@@ -74,6 +74,11 @@ def main():
 
 set -e
 
+ulimit -s unlimited
+
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+
 echo "=== Starting Iterative Macrocycle Pipeline ==="
 echo "Running on node: \$(hostname)"
 
