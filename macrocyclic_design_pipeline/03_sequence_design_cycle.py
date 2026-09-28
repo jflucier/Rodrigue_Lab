@@ -175,6 +175,7 @@ for i, aa in enumerate(design_seq):
     # directly to PyRosetta's internal structural index number
     pdb_res_num = i + 1
     pose_res_idx = p_info.pdb2pose('A', pdb_res_num)
+    print(f" -> Position PDB:{pdb_res_num} (Pose:{pose_res_idx}) AA:{aa}")
     
     # Safety Check: Confirm this residue actually exists on Chain A inside the PDB layout
     if pose_res_idx == 0:
