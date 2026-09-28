@@ -59,7 +59,7 @@ def main():
     slurm_script_path = out_path / "run_pipeline_job.slurm"
 
     # =============================================================================
-    # GENERATE THE .SLURM SCRIPT HEADERS
+    # GENERATE THE .SLURM SCRIPT HEADERS (Using standard f-string for args injection)
     # =============================================================================
     slurm_content = f"""#!/bin/bash
 #SBATCH --job-name=macrocycle_pipeline
@@ -123,8 +123,14 @@ for rnd in $(seq 1 __N_ROUNDS__); do
     RELAXED_PDB="${ROUND_DIR}/__STEM___r${rnd}.pdb"
     TMP_SCRIPT="${ROUND_DIR}/__STEM___r${rnd}.relax.py"
 
+    # Define paths dynamically using standard bash echo commands to bypass cat EOF limits
+    echo "round_dir = \"${ROUND_DIR}\"" > "${TMP_SCRIPT}"
+    echo "mpnn_fasta_path = \"${MPNN_OUT}\"" >> "${TMP_SCRIPT}"
+    echo "current_pdb_path = \"${CURRENT_PDB}\"" >> "${TMP_SCRIPT}"
+    echo "relaxed_pdb_path = \"${RELAXED_PDB}\"" >> "${TMP_SCRIPT}"
+
     # Write out separate python runtime script
-    cat << 'EOF' > "${TMP_SCRIPT}"
+    cat << 'EOF' >> "${TMP_SCRIPT}"
 from pyrosetta import *
 import pyrosetta.rosetta.protocols.rosetta_scripts as rosetta_scripts
 import glob
@@ -138,13 +144,9 @@ fr = objs.get_mover('full_relax_complex')
 pcm = objs.get_mover('pcm')
 
 # 2. Parse the designed sequence from the ProteinMPNN FASTA output
-round_dir = '__ROUND_DIR_PATH__'
 fa_matches = glob.glob(f"{round_dir}/seqs/*.fa")
-
 if not fa_matches:
     raise FileNotFoundError(f"Could not find any ProteinMPNN FASTA output files inside {round_dir}/seqs/")
-
-mpnn_fasta_path = fa_matches[0]
 
 design_seq = ""
 with open(mpnn_fasta_path, 'r') as f:
@@ -156,7 +158,7 @@ if not design_seq:
     raise ValueError(f"Could not parse valid sequence array out of {mpnn_fasta_path}")
 
 # 3. Load target backbone coordinate frame
-pose = pose_from_pdb('${CURRENT_PDB}')
+pose = pose_from_pdb(current_pdb_path)
 
 # 4. Thread the custom sequence onto Chain A (the macrocycle)
 print(f"Threading ProteinMPNN sequence onto Chain A: {design_seq}")
@@ -173,7 +175,7 @@ fr.apply(pose)
 pcm.apply(pose)
 
 # Save result state
-pose.dump_pdb('${RELAXED_PDB}')
+pose.dump_pdb(relaxed_pdb_path)
 EOF
 
     # Run PyRosetta within container
@@ -193,8 +195,6 @@ done
         processed_block = processed_block.replace("__BIND_PATH__", str(args.bind_path))
         processed_block = processed_block.replace("__MPNN_SIF__", str(args.proteinmpnn_sif))
         processed_block = processed_block.replace("__XML_PATH__", str(fast_relax_xml.resolve()))
-        processed_block = processed_block.replace("__ROUND_DIR_PATH__", f"{out_path}/{stem}/round${{rnd}}")
-        processed_block = processed_block.replace("__CURRENT_PDB_VAL__", "${CURRENT_PDB}")
 
         slurm_content += processed_block
 
