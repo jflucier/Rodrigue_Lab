@@ -159,9 +159,10 @@ if not fa_matches:
 
 design_seq = ""
 with open(mpnn_fasta_path, 'r') as f:
-    lines = f.readlines()
-    if len(lines) >= 2:
-        design_seq = lines[-1].strip()
+    valid_seq_lines = [line.strip() for line in f if line.strip() and not line.startswith('>')]
+    if valid_seq_lines:
+        design_seq = "".join(valid_seq_lines) # Joins multi-line sequences safely
+
 
 if not design_seq:
     raise ValueError(f"Could not parse valid sequence array out of {mpnn_fasta_path}")
@@ -172,22 +173,44 @@ pose = pose_from_pdb(current_pdb_path)
 
 # 4. Thread the custom sequence onto Chain A (the macrocycle)
 print(f"Threading ProteinMPNN sequence onto Chain A: {design_seq}")
+sys.stdout.flush()
+
 p_info = pose.pdb_info()
 mutator = rosetta.protocols.simple_moves.MutateResidue()
+
+aa_1to3 = {
+    'A': 'ALA', 'C': 'CYS', 'D': 'ASP', 'E': 'GLU', 'F': 'PHE',
+    'G': 'GLY', 'H': 'HIS', 'I': 'ILE', 'K': 'LYS', 'L': 'LEU',
+    'M': 'MET', 'N': 'ASN', 'P': 'PRO', 'Q': 'GLN', 'R': 'ARG',
+    'S': 'SER', 'T': 'THR', 'V': 'VAL', 'W': 'TRP', 'Y': 'TYR'
+}
 
 for i, aa in enumerate(design_seq):
     # Convert PDB string coordinates (e.g., residue 1 on Chain 'A') 
     # directly to PyRosetta's internal structural index number
     pdb_res_num = i + 1
     pose_res_idx = p_info.pdb2pose('A', pdb_res_num)
-    print(f" -> Position PDB:{pdb_res_num} (Pose:{pose_res_idx}) AA:{aa}")
+    
+    # Safety Check: Confirm this residue actually exists on Chain A inside the PDB layout
+    if pose_res_idx == 0:
+        raise IndexError(f"CRITICAL: Residue {pdb_res_num} on Chain A does not map to any valid position in this PDB structure!")
+
+    # Guard against hidden characters or punctuation spacing
+    current_char = aa.upper()
+    if current_char not in aa_1to3:
+        print(f" [WARN] Skipping non-standard character asset '{aa}' at text index {i}")
+        continue
+    
+    aa_3letter = aa_1to3[current_char]
+    print(f" -> Position PDB:{pdb_res_num} (Pose:{pose_res_idx}) AA:{aa} AA3:{aa_3letter}")
+    sys.stdout.flush()
     
     # Safety Check: Confirm this residue actually exists on Chain A inside the PDB layout
     if pose_res_idx == 0:
         raise IndexError(f"CRITICAL: Residue {pdb_res_num} on Chain A does not map to any valid position in this PDB complex structure!")
         
     mutator.set_target(pose_res_idx)
-    mutator.set_res_name(aa)
+    mutator.set_res_name(aa_3letter)
     mutator.apply(pose)
 
 # 5. Enforce rings geometry closure and relax complex using Paper constraints
