@@ -193,6 +193,8 @@ done
         processed_block = processed_block.replace("__BIND_PATH__", str(args.bind_path))
         processed_block = processed_block.replace("__MPNN_SIF__", str(args.proteinmpnn_sif))
         processed_block = processed_block.replace("__XML_PATH__", str(fast_relax_xml.resolve()))
+        processed_block = processed_block.replace("__ROUND_DIR_PATH__", f"{out_path}/{stem}/round${{rnd}}")
+        processed_block = processed_block.replace("__CURRENT_PDB_VAL__", "${CURRENT_PDB}")
 
         slurm_content += processed_block
 
