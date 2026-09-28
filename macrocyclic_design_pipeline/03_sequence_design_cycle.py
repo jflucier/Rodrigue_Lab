@@ -167,9 +167,19 @@ pose = pose_from_pdb(current_pdb_path)
 
 # 4. Thread the custom sequence onto Chain A (the macrocycle)
 print(f"Threading ProteinMPNN sequence onto Chain A: {design_seq}")
+p_info = pose.pdb_info()
 mutator = rosetta.protocols.simple_moves.MutateResidue()
+
 for i, aa in enumerate(design_seq):
-    pose_res_idx = i + 1  # PyRosetta utilizes 1-based indexing
+    # Convert PDB string coordinates (e.g., residue 1 on Chain 'A') 
+    # directly to PyRosetta's internal structural index number
+    pdb_res_num = i + 1
+    pose_res_idx = p_info.pdb2pose('A', pdb_res_num)
+    
+    # Safety Check: Confirm this residue actually exists on Chain A inside the PDB layout
+    if pose_res_idx == 0:
+        raise IndexError(f"CRITICAL: Residue {pdb_res_num} on Chain A does not map to any valid position in this PDB complex structure!")
+        
     mutator.set_target(pose_res_idx)
     mutator.set_res_name(aa)
     mutator.apply(pose)
