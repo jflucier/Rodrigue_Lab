@@ -136,12 +136,12 @@ for rnd in $(seq 1 __N_ROUNDS__); do
 
     # Write out separate python runtime script
     cat << 'EOF' >> "${TMP_SCRIPT}"
-print(f"imports")
+print("imports")
 from pyrosetta import *
 import pyrosetta.rosetta.protocols.rosetta_scripts as rosetta_scripts
 import glob
 
-print(f"init")
+print("init")
 init('-beta_nov16 -mute all')
 
 # 1. Load the core XML structures
@@ -152,7 +152,7 @@ fr = objs.get_mover('full_relax_complex')
 pcm = objs.get_mover('pcm')
 
 # 2. Parse the designed sequence from the ProteinMPNN FASTA output
-print(f"Parse the designed sequence from the ProteinMPNN FASTA output")
+print("Parse the designed sequence from the ProteinMPNN FASTA output")
 fa_matches = glob.glob(f"{round_dir}/seqs/*.fa")
 if not fa_matches:
     raise FileNotFoundError(f"Could not find any ProteinMPNN FASTA output files inside {round_dir}/seqs/")
@@ -167,7 +167,7 @@ if not design_seq:
     raise ValueError(f"Could not parse valid sequence array out of {mpnn_fasta_path}")
 
 # 3. Load target backbone coordinate frame
-print(f"Load target backbone coordinate frame")
+print("Load target backbone coordinate frame")
 pose = pose_from_pdb(current_pdb_path)
 
 # 4. Thread the custom sequence onto Chain A (the macrocycle)
