@@ -75,7 +75,7 @@ def main():
 set -e
 
 echo "=== Starting Iterative Macrocycle Pipeline ==="
-echo "Running on node: \$(hostname)"
+echo "Running on node: $(hostname)"
 
 # Internal container paths
 MPNN_SCRIPT="/opt/proteinmpnn/protein_mpnn_run.py"
