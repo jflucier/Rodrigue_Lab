@@ -1,11 +1,13 @@
 import argparse
+import glob
 import os
+import subprocess
 import sys
 
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Generate a Slurm submission script for AlphaFast."
+        description="Generate and submit a Slurm submission script for AlphaFast."
     )
 
     valid_gpus = [
@@ -49,7 +51,12 @@ def parse_args():
         default="/scratch/$USER/programs/alphafast",
         help="Path to AlphaFast program root (Default: /scratch/$USER/programs/alphafast)",
     )
-
+    parser.add_argument(
+        "-b",
+        "--base_path",
+        default=None,
+        help="Base path containing the inputs directory (Defaults to the current working directory)",
+    )
     parser.add_argument(
         "-o",
         "--output_script",
@@ -63,14 +70,39 @@ def parse_args():
 def main():
     args = parse_args()
 
-    # Dynamic Bash code snippet to inject into the template fallback logic
-    # If -b is missing, fallback to current working directory (PWD)
-    base_path_fallback_logic = """# Step 1: Handle fallback if base path was not provided
-if [ -z "$BASE_PATH" ]; then
-    BASE_PATH="$(pwd)"
-    echo "Notice: No base path provided. Defaulting to current working directory: $BASE_PATH"
-fi"""
+    # Step 1: Handle base path resolution in Python
+    if args.base_path is None:
+        base_dir = os.getcwd()
+        print(f"Notice: No base path provided. Defaulting to current working directory: {base_dir}")
+    else:
+        base_dir = os.path.abspath(args.base_path)
 
+    inputs_dir = os.path.join(base_dir, "inputs")
+
+    # Step 2: Validate targeted workspace directories
+    if not os.path.isdir(base_dir):
+        print(f"Error: The resolved base path directory '{base_dir}' does not exist.", file=sys.stderr)
+        sys.exit(1)
+
+    if not os.path.isdir(inputs_dir):
+        print(f"Error: Required 'inputs' directory not found at '{inputs_dir}'. Check your files.", file=sys.stderr)
+        sys.exit(1)
+
+    # Step 3: Count JSON inputs and calculate batch/array requirements
+    json_files = glob.glob(os.path.join(inputs_dir, "*.json"))
+    total_inputs = len(json_files)
+
+    if total_inputs == 0:
+        print(f"Error: No .json structural files found inside '{inputs_dir}'.", file=sys.stderr)
+        sys.exit(1)
+
+    chunk_size = 100
+    max_array_idx = (total_inputs - 1) // chunk_size
+
+    print(f"Found {total_inputs} input structures inside '{inputs_dir}'.")
+    print(f"Splitting into {max_array_idx + 1} batch task(s) of up to {chunk_size} items each.")
+
+    # Step 4: Construct the pure Bash template layout
     slurm_template = f"""#!/bin/bash
 #SBATCH --job-name=afast
 #SBATCH --output=afast_%x_%j.out
@@ -110,19 +142,21 @@ while true; do
     esac
 done
 
-{base_path_fallback_logic}
+if [ -z "$BASE_PATH" ]; then
+    BASE_PATH="{base_dir}"
+fi
 
-# Step 2: Validate that the resolved base path directory exists
 if [ ! -d "$BASE_PATH" ]; then
-    echo "Error: The resolved base path '$BASE_PATH' does not exist."
+    echo "Error: Base directory '$BASE_PATH' does not exist."
     exit 1
 fi
 
-# Step 3: Validate that the inputs folder inside the base path exists
 if [ ! -d "$BASE_PATH/inputs" ]; then
-    echo "Error: Required directory '$BASE_PATH/inputs' not found."
+    echo "Error: Directory '$BASE_PATH/inputs' not found."
     exit 1
 fi
+
+mkdir -p "$BASE_PATH/outputs"
 
 if [ -n "$SLURM_ARRAY_TASK_ID" ]; then
   echo "Notice: Slurm Job Array mode detected. Running index: ${{SLURM_ARRAY_TASK_ID}}"
@@ -135,12 +169,10 @@ if [ -n "$SLURM_ARRAY_TASK_ID" ]; then
   START_IDX=$((SLURM_ARRAY_TASK_ID * CHUNK_SIZE))
   END_IDX=$((START_IDX + CHUNK_SIZE - 1))
 
-  # Prevent index out of bounds on the final task chunk iteration
   if [ $END_IDX -ge $TOTAL_INPUTS ]; then
       END_IDX=$((TOTAL_INPUTS - 1))
   fi
 
-  # Symlink the exact assigned JSON block into the temporary folder
   for ((i=START_IDX; i<=END_IDX; i++)); do
       FILE_PATH="${{ALL_INPUTS[i]}}"
       if [ -f "$FILE_PATH" ]; then
@@ -159,30 +191,43 @@ if [ -z "$(ls -A "$TASK_INPUT_DIR" 2>/dev/null)" ]; then
 fi
 
 echo "Base Path:  $BASE_PATH"
-echo "AFAST: $AFAST"
-echo "Running alphafast on ${{BASE_PATH}}/inputs"
+echo "AFAST:      $AFAST"
+echo "Running alphafast processing chunk..."
+
 ${{AFAST}}/scripts/run_alphafast.sh \\
     --input_dir "${{TASK_INPUT_DIR}}" \\
-    --output_dir ${{BASE_PATH}}/outputs \\
-    --db_dir ${{AFAST}}/dbs \\
-    --weights_dir ${{AFAST}}/weights \\
-    --temp_dir $SLURM_TMPDIR/alphafast_tmp \\
-    --container ${{AFAST}}/alphafast.sif \\
-    --jax_compilation_cache_dir $SLURM_TMPDIR/alphafast_jax_cache \\
+    --output_dir "${{BASE_PATH}}/outputs" \\
+    --db_dir "${{AFAST}}/dbs" \\
+    --weights_dir "${{AFAST}}/weights" \\
+    --temp_dir "$SLURM_TMPDIR/alphafast_tmp" \\
+    --container "${{AFAST}}/alphafast.sif" \\
+    --jax_compilation_cache_dir "$SLURM_TMPDIR/alphafast_jax_cache" \\
     --gpu_devices 0
+
 echo "done"
 """
 
+    # Step 5: Save script to file system
     try:
         with open(args.output_script, "w", encoding="utf-8") as f:
             f.write(slurm_template)
 
         os.chmod(args.output_script, 0o755)
-        print(
-            f"Successfully generated executable Slurm script at: {args.output_script}"
-        )
+        print(f"Successfully generated executable Slurm script at: {args.output_script}")
     except Exception as e:
         print(f"Error writing file: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    # Step 6: Submit to Slurm via sbatch command execution
+    sbatch_cmd = ["sbatch", f"--array=0-{max_array_idx}", args.output_script]
+
+    # Forward optional base_path or custom afast arguments into the sbatch execution payload
+    if args.base_path:
+        sbatch_cmd.extend(["-b", base_dir])
+    if args.afast != "/scratch/$USER/programs/alphafast":
+        sbatch_cmd.extend(["-a", args.afast])
+
+    print(f"To submit: {' '.join(sbatch_cmd)}")
 
 
 if __name__ == "__main__":
