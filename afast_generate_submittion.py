@@ -202,7 +202,8 @@ ${{AFAST}}/scripts/run_alphafast.sh \\
     --temp_dir "$SLURM_TMPDIR/alphafast_tmp" \\
     --container "${{AFAST}}/alphafast.sif" \\
     --jax_compilation_cache_dir "$SLURM_TMPDIR/alphafast_jax_cache" \\
-    --gpu_devices 0
+    --gpu_devices 0 \\
+    --num_workers 1
 
 echo "done"
 """
