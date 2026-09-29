@@ -34,6 +34,7 @@ docs/changelog periodically — this is a fast-moving codebase.
 | 0 | `scripts/00_preprocess_pdb.py` | Strips waters/ligands from downloaded target PDBs (paper Methods 2.2.1) |
 | 1 | `scripts/01_build_rfpeptides_runs.py` | TSV → per-target `run_inference.py` shell scripts (RFpeptides flags) |
 | 2 | `scripts/02_run_rfpeptides.sh` | Runs those scripts, producing cyclic macrocycle backbones |
+| 2b | `scripts/02b_normalize_chains.py` | **Required.** Relabels chains so macrocycle=A, target=B (see caveat below) |
 | 3 | `scripts/03_sequence_design_cycle.py` | 4x [ProteinMPNN → PyRosetta FastRelax + `PeptideCyclizeMover`] |
 | 4 | `scripts/04_afcycdesign_filter.py` | AfCycDesign re-prediction; filter on normalized iPAE / Ca RMSD |
 | 5 | `scripts/05_rosetta_filter.py` | Rosetta ddG / SAP / contact molecular surface filter |
@@ -105,20 +106,54 @@ Each design gets `contigmap.contigs=[<length> <chain><lo>-<hi>/0]`,
 `ppi.hotspot_res=[...]` — the exact flags from
 [`design_macrocyclic_binder.sh`](https://github.com/RosettaCommons/RFdiffusion/blob/main/examples/design_macrocyclic_binder.sh).
 
+## 2b. Normalize chain letters (required)
+
+**RFdiffusion does not reliably put the diffused macrocycle on chain A.**
+It honors whatever letter the contig gives the fixed/target block, and
+assigns the unlabeled diffused block whatever letter is left over — so if
+your target's own chain happens to be `A` (very common), the macrocycle
+often comes out as chain `B` and the target keeps `A`. Every downstream
+piece of this pipeline (`fast_relax_cyclize.xml`, `interface_metrics.xml`,
+`03b_fastrelax_worker.py`, ProteinMPNN's `--pdb_path_chains`) assumes
+macrocycle=A, target=B. If that assumption is wrong for a given backbone,
+ProteinMPNN redesigns the *target* instead of the macrocycle, and
+`PeptideCyclizeMover` then fails with `res2.is_bonded(res1)` trying to
+close a peptide bond on a chain that was never diffused as cyclic — this
+is exactly what happened with the dnaJ campaign backbones.
+
+Run this between backbone generation and sequence design, for every
+target's output directory:
+
+```bash
+python scripts/02b_normalize_chains.py rfpeptides_runs/MCL1_campaign \
+    --out-dir rfpeptides_runs_normalized/MCL1_campaign
+```
+
+It relabels the chain with fewer residues to `A` (the macrocycle is always
+far shorter than the target domains here — 8-18 vs. 70-300+ residues) and
+everything else to `B`, `C`, ... A backbone where this heuristic looks
+unsafe (fewer than 2 chains, or the "short" chain implausibly long) is
+skipped with a warning rather than silently mislabeled — check those by
+hand rather than assume they're fine.
+
+Point step 3's `--backbones-dir` at the **normalized** output directory,
+not RFdiffusion's raw output.
+
 ## 3. Sequence design + cyclization enforcement
+
+Generates a chain of SLURM job arrays (MPNN array → FastRelax array, per
+round, dependency-linked) rather than running locally — see the script's
+own docstring for the full option list.
 
 ```bash
 python scripts/03_sequence_design_cycle.py \
-    --backbones-dir rfpeptides_runs/MCL1_campaign \
+    --backbones-dir rfpeptides_runs_normalized/MCL1_campaign \
     --out-dir mpnn_outputs/MCL1_campaign \
-    --proteinmpnn-dir /path/to/ProteinMPNN \
-    --mpnn-weights /path/to/vanilla_model_weights/v_48_020.pt \
+    --sif /path/to/combined_proteinmpnn_pyrosetta.sif \
     --n-rounds 4
-```
 
-Wire the sequence-threading glue (fasta → pose) to match your ProteinMPNN
-version's output layout before running for real — see the `TODO`-style note
-in the script.
+bash mpnn_outputs/MCL1_campaign/submit_all.sh
+```
 
 ## 4. AfCycDesign filter
 
