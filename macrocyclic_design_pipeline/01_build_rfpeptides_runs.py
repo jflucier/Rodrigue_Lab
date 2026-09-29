@@ -180,7 +180,7 @@ def main():
     ap.add_argument("--container-sif",
                     default="/home/jflucier/programs/Rodrigue_Lab/macrocyclic_design_pipeline/containers/rfdiffusion_gh200.sif",
                     help="Path to the Apptainer/Singularity container file (.sif)")
-    ap.add_argument("--default-length", default="10-14",
+    ap.add_argument("--default-length", default="5-15",
                     help="Macrocycle length used when a row has no 'length' column")
     ap.add_argument("--num-designs", type=int, default=10000,
                     help="Total targeted number of backbones desired per run profile")

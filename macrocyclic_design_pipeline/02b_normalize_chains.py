@@ -81,7 +81,7 @@ def main():
     ap.add_argument("backbones_dir")
     ap.add_argument("--out-dir", required=True,
                      help="Where normalized copies are written (mirrors input filenames)")
-    ap.add_argument("--max-macrocycle-len", type=int, default=30,
+    ap.add_argument("--max-macrocycle-len", type=int, default=18,
                      help="Sanity bound: if the shortest chain exceeds this many "
                           "residues, the file is skipped instead of guessed at")
     args = ap.parse_args()
