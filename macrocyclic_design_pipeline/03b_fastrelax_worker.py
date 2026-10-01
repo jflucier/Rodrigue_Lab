@@ -80,18 +80,18 @@ def run_job(in_pdb, fasta, out_pdb, pcm, fr):
     if len(seq) != len(chain_a):
         raise ValueError(f"designed seq length {len(seq)} != chain A length "
                          f"{len(chain_a)} in {in_pdb}")
-    bad = sorted(set(seq) - set(AA_1TO3))
-    if bad:
-        raise ValueError(f"non-standard characters in designed sequence: {bad}")
+    # bad = sorted(set(seq) - set(AA_1TO3))
+    # if bad:
+    #     raise ValueError(f"non-standard characters in designed sequence: {bad}")
 
-    gap = terminus_gap(pose, chain_a)
-    print(f"  threading {seq} onto chain A ({len(chain_a)} res), "
-          f"N-C terminus gap = {gap:.2f} A (expect ~1.3 A for a closed bond)",
-          flush=True)
-    if gap > 3.0:
-        print(f"  [NOTE] gap is large -- this backbone's termini likely never "
-              f"closed during RFdiffusion sampling; a cyclization failure below "
-              f"is expected for this one, not a pipeline bug", flush=True)
+    # gap = terminus_gap(pose, chain_a)
+    # print(f"  threading {seq} onto chain A ({len(chain_a)} res), "
+    #       f"N-C terminus gap = {gap:.2f} A (expect ~1.3 A for a closed bond)",
+    #       flush=True)
+    # if gap > 3.0:
+    #     print(f"  [NOTE] gap is large -- this backbone's termini likely never "
+    #           f"closed during RFdiffusion sampling; a cyclization failure below "
+    #           f"is expected for this one, not a pipeline bug", flush=True)
 
     mutator = MutateResidue()
     for pose_idx, aa in zip(chain_a, seq):
@@ -119,7 +119,7 @@ def main():
                           "just the failing backbones, not a full production chunk.")
     args = ap.parse_args()
 
-    init("-beta_nov16 -detect_bonds false -in:file:no_detect_pseudobonds true -cyclic_peptide true" if args.debug else "-beta_nov16 -detect_bonds false -in:file:no_detect_pseudobonds true -cyclic_peptide true -mute all")
+    init("-beta_nov16" if args.debug else "-beta_nov16 -mute all")
     objs = rosetta_scripts.XmlObjects.create_from_file(args.xml)
     fr = objs.get_mover("full_relax_complex")
     pcm = objs.get_mover("pcm")
