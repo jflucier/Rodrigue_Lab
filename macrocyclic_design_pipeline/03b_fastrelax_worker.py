@@ -22,6 +22,7 @@ from pyrosetta import init, pose_from_pdb
 from pyrosetta.io import pose_from_pdbstring
 import pyrosetta.rosetta.protocols.rosetta_scripts as rosetta_scripts
 from pyrosetta.rosetta.protocols.simple_moves import MutateResidue
+from pyrosetta.rosetta.protocols.simple_moves import CyclizationMover
 
 AA_1TO3 = {
     'A': 'ALA', 'C': 'CYS', 'D': 'ASP', 'E': 'GLU', 'F': 'PHE',
@@ -118,9 +119,18 @@ def run_job(in_pdb, fasta, out_pdb, pcm, fr):
         mutator.set_res_name(AA_1TO3[aa])
         mutator.apply(pose)
 
-    pcm.apply(pose)
+    # 2. OVERRIDE THE XML AUTO-DETECTION: Explicitly lock the 13-residue cycle
+    # Syntax: CyclizationMover( chain_number, add_constraints, minimize, build_conformation )
+    python_cyclizer = CyclizationMover(1, True, True, 1)
+    python_cyclizer.apply(pose)
+
+    # pcm.apply(pose)
+    # 3. Execute your interface relaxation safely
     fr.apply(pose)
-    pcm.apply(pose)
+    # pcm.apply(pose)
+    # 4. Re-verify the loop constraints at the true 13-residue index endpoint
+    python_cyclizer.apply(pose)
+
     Path(out_pdb).parent.mkdir(parents=True, exist_ok=True)
     pose.dump_pdb(out_pdb)
 
