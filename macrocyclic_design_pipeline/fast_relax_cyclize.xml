@@ -40,7 +40,7 @@ with interface-aware constraints. Chain A = macrocycle, chain B = target.
         </OperateOnResidueSubset>
     </TASKOPERATIONS>
     <MOVERS>
-        <PeptideCyclizeMover name="pcm" residue_selector="chA"/>
+        <!-- <PeptideCyclizeMover name="pcm" residue_selector="chA"/> -->
         <FastRelax name="full_relax_complex"
             repeats="3"
             scorefxn="beta"
