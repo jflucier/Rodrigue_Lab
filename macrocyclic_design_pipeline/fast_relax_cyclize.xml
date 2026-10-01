@@ -55,7 +55,7 @@ with interface-aware constraints. Chain A = macrocycle, chain B = target.
         </FastRelax>
     </MOVERS>
     <PROTOCOLS>
-        <Add mover="pcm" />
+        <!-- <Add mover="pcm" /> -->
         <Add mover="full_relax_complex"/>
     </PROTOCOLS>
     <OUTPUT />
