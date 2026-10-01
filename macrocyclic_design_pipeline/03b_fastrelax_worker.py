@@ -128,7 +128,6 @@ def run_job(in_pdb, fasta, out_pdb, fr):
 
     # pose = pose_from_pdb(in_pdb)
     pdb_string_data = "\n".join(fixed_lines)
-    print(f"PDB: {pdb_string_data}")
     pose = pose_from_pdbstring(pdb_string_data)
 
     info = pose.pdb_info()
