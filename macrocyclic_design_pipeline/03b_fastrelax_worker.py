@@ -119,7 +119,7 @@ def main():
                           "just the failing backbones, not a full production chunk.")
     args = ap.parse_args()
 
-    init("-beta_nov16 -detect_links false -cyclic_peptide" if args.debug else "-beta_nov16 -detect_links false -cyclic_peptide -mute all")
+    init("-beta_nov16 -detect_links false -cyclic_peptide true" if args.debug else "-beta_nov16 -detect_links false -cyclic_peptide true -mute all")
     objs = rosetta_scripts.XmlObjects.create_from_file(args.xml)
     fr = objs.get_mover("full_relax_complex")
     pcm = objs.get_mover("pcm")
