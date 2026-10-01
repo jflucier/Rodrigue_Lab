@@ -55,6 +55,22 @@ def read_designed_sequence(fasta_path):
     return records[1].split("/")[0].upper()
 
 
+def terminus_gap(pose, chain_a):
+    """
+    Distance between the chain's C-terminal C atom and N-terminal N atom --
+    i.e. the gap the would-be peptide bond has to close. A real peptide
+    bond is ~1.33 A; anything much larger means this particular backbone's
+    termini were never actually brought together by RFdiffusion sampling,
+    and PeptideCyclizeMover/FastRelax failing on it reflects a bad sample,
+    not a pipeline bug.
+    """
+    first_res = pose.residue(chain_a[0])
+    last_res = pose.residue(chain_a[-1])
+    n_xyz = first_res.xyz("N")
+    c_xyz = last_res.xyz("C")
+    return (n_xyz - c_xyz).norm()
+
+
 def run_job(in_pdb, fasta, out_pdb, pcm, fr):
     seq = read_designed_sequence(fasta)
     pose = pose_from_pdb(in_pdb)
@@ -68,7 +84,15 @@ def run_job(in_pdb, fasta, out_pdb, pcm, fr):
     if bad:
         raise ValueError(f"non-standard characters in designed sequence: {bad}")
 
-    print(f"  threading {seq} onto chain A ({len(chain_a)} res)", flush=True)
+    gap = terminus_gap(pose, chain_a)
+    print(f"  threading {seq} onto chain A ({len(chain_a)} res), "
+          f"N-C terminus gap = {gap:.2f} A (expect ~1.3 A for a closed bond)",
+          flush=True)
+    if gap > 3.0:
+        print(f"  [NOTE] gap is large -- this backbone's termini likely never "
+              f"closed during RFdiffusion sampling; a cyclization failure below "
+              f"is expected for this one, not a pipeline bug", flush=True)
+
     mutator = MutateResidue()
     for pose_idx, aa in zip(chain_a, seq):
         mutator.set_target(pose_idx)
@@ -87,9 +111,15 @@ def main():
                                   formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--jobs-tsv", required=True)
     ap.add_argument("--xml", required=True)
+    ap.add_argument("--debug", action="store_true",
+                     help="Don't mute Rosetta tracers -- shows PeptideCyclizeMover's "
+                          "own diagnostic output for WHY a bond couldn't be "
+                          "established, instead of just the later CountPairFactory "
+                          "assertion. Much noisier; use on a small --jobs-tsv of "
+                          "just the failing backbones, not a full production chunk.")
     args = ap.parse_args()
 
-    init("-beta_nov16 -mute all")
+    init("-beta_nov16" if args.debug else "-beta_nov16 -mute all")
     objs = rosetta_scripts.XmlObjects.create_from_file(args.xml)
     fr = objs.get_mover("full_relax_complex")
     pcm = objs.get_mover("pcm")
