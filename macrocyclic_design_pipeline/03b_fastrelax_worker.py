@@ -21,6 +21,7 @@ from io import StringIO
 
 from pyrosetta import init, pose_from_pdb
 from pyrosetta.io import pose_from_pdbstring
+from pyrosetta.rosetta.core.scoring import CA_rmsd
 import pyrosetta.rosetta.protocols.rosetta_scripts as rosetta_scripts
 from pyrosetta.rosetta.protocols.simple_moves import MutateResidue
 from pyrosetta.rosetta.protocols.simple_moves import CyclizationMover
@@ -73,6 +74,41 @@ def terminus_gap(pose, chain_a):
     c_xyz = last_res.xyz("C")
     return (n_xyz - c_xyz).norm()
 
+def load_pose_with_ter_fix(pdb_path):
+    """
+    Parses a raw PDB file and injects a TER record between Chain A and Chain B
+    to prevent Rosetta from bridging polymer bonds over open target protein gaps.
+    """
+    raw_lines = Path(pdb_path).read_text().splitlines()
+    fixed_lines = []
+    last_chain = None
+
+    for line in raw_lines:
+        if line.startswith("ATOM  "):
+            current_chain = line[21]  # Extract Chain ID column
+            if last_chain == "A" and current_chain == "B":
+                fixed_lines.append("TER")
+            last_chain = current_chain
+        fixed_lines.append(line)
+
+    return pose_from_pdbstring("\n".join(fixed_lines))
+
+def get_previous_round_path(out_pdb):
+    """
+    Deduces the path of the previous round's output file to compare RMSD.
+    Example: if out_pdb ends with '..._mpnn4.pdb', looks for '..._mpnn3.pdb'
+    """
+    out_path = Path(out_pdb)
+    name = out_path.stem
+
+    # Check if the name ends with an explicit round tracker index suffix
+    for i in range(2, 6):  # Checks rounds 2, 3, 4, 5
+        if name.endswith(f"_mpnn{i}"):
+            prev_name = name.replace(f"_mpnn{i}", f"_mpnn{i - 1}")
+            prev_path = out_path.with_name(prev_name + out_path.suffix)
+            if prev_path.exists():
+                return prev_path
+    return None
 
 def run_job(in_pdb, fasta, out_pdb, fr):
     seq = read_designed_sequence(fasta)
@@ -124,6 +160,15 @@ def run_job(in_pdb, fasta, out_pdb, fr):
     # Syntax: CyclizationMover( chain_number, add_constraints, minimize, build_conformation )
     python_cyclizer = CyclizationMover(1, True, True, 1)
     python_cyclizer.apply(pose)
+
+    prev_pdb_path = get_previous_round_path(out_pdb)
+    if prev_pdb_path:
+        try:
+            prev_pose = load_pose_with_ter_fix(prev_pdb_path)
+            drift = CA_rmsd(pose, prev_pose, 1, len(chain_a))
+            print(f"  --> Macrocycle backbone drift vs. previous round: {drift:.4f} A", flush=True)
+        except Exception:
+            print("  --> [NOTE] Failed to calculate backbone RMSD comparison.", flush=True)
 
     # pcm.apply(pose)
     # 3. Execute your interface relaxation safely
