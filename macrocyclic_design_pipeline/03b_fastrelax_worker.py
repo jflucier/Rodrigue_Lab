@@ -17,6 +17,7 @@ import argparse
 import sys
 import traceback
 from pathlib import Path
+from io import StringIO
 
 from pyrosetta import init, pose_from_pdb
 from pyrosetta.io import pose_from_pdbstring
@@ -131,8 +132,22 @@ def run_job(in_pdb, fasta, out_pdb, fr):
     # 4. Re-verify the loop constraints at the true 13-residue index endpoint
     python_cyclizer.apply(pose)
 
+    sio = StringIO()
+    pose.dump_pdb(sio)
+    rosetta_lines = sio.getvalue().splitlines()
+
+    # 2. Filter out non-standard structural records (like pose energy tables)
+    clean_pdb_lines = [
+        line for line in rosetta_lines
+        if line.startswith(("ATOM", "HETATM", "TER", "ENDMDL", "END"))
+    ]
+
+    # 3. Save a clean, standard PDB file that downstream tools can parse perfectly
     Path(out_pdb).parent.mkdir(parents=True, exist_ok=True)
-    pose.dump_pdb(out_pdb)
+    Path(out_pdb).write_text("\n".join(clean_pdb_lines))
+
+    # Path(out_pdb).parent.mkdir(parents=True, exist_ok=True)
+    # pose.dump_pdb(out_pdb)
 
 
 def main():
