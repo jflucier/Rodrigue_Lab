@@ -32,6 +32,8 @@ with interface-aware constraints. Chain A = macrocycle, chain B = target.
         <And name="non_interface_target" selectors="not_target_int,target"/>
     </RESIDUE_SELECTORS>
     <TASKOPERATIONS>
+        <!-- Retain original sidechain coordinate trees exactly as loaded -->
+        <IncludeCurrent name="keep_current"/>
         <OperateOnResidueSubset name="move_interface" selector="target_int" >
             <RestrictToRepackingRLT/>
         </OperateOnResidueSubset>
@@ -46,7 +48,7 @@ with interface-aware constraints. Chain A = macrocycle, chain B = target.
             scorefxn="beta"
             min_type="dfpmin_armijo_nonmonotone"
             ramp_down_constraints="false"
-            task_operations="move_interface,hold_non_interface">
+            task_operations="move_interface,hold_non_interface,keep_current">
             <MoveMap name="specifics">
                 <Jump number="1" setting="true" />
                 <ResidueSelector selector="non_interface_target" chi="0" bb="0" />
