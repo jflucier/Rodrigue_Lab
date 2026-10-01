@@ -19,6 +19,7 @@ import traceback
 from pathlib import Path
 
 from pyrosetta import init, pose_from_pdb
+from pyrosetta.io import pose_from_pdbstring
 import pyrosetta.rosetta.protocols.rosetta_scripts as rosetta_scripts
 from pyrosetta.rosetta.protocols.simple_moves import MutateResidue
 
@@ -73,7 +74,25 @@ def terminus_gap(pose, chain_a):
 
 def run_job(in_pdb, fasta, out_pdb, pcm, fr):
     seq = read_designed_sequence(fasta)
-    pose = pose_from_pdb(in_pdb)
+
+    raw_lines = Path(in_pdb).read_text().splitlines()
+    fixed_lines = []
+    last_chain = None
+
+    for line in raw_lines:
+        if line.startswith("ATOM  "):
+            current_chain = line[21]  # Extract the Chain ID column
+            # If we just finished reading Chain A and are moving to Chain B, insert a TER record
+            if last_chain == "A" and current_chain == "B":
+                fixed_lines.append("TER")
+            last_chain = current_chain
+        fixed_lines.append(line)
+
+    # pose = pose_from_pdb(in_pdb)
+    pdb_string_data = "\n".join(fixed_lines)
+    print(f"PDB: {pdb_string_data}")
+    pose = pose_from_pdbstring(pdb_string_data)
+
     info = pose.pdb_info()
     chain_a = [i for i in range(1, pose.size() + 1) if info.chain(i) == "A"]
 
