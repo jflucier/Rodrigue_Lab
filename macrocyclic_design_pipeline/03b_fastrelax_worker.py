@@ -151,7 +151,7 @@ def main():
     init("-beta_nov16" if args.debug else "-beta_nov16 -mute all")
     objs = rosetta_scripts.XmlObjects.create_from_file(args.xml)
     fr = objs.get_mover("full_relax_complex")
-    pcm = objs.get_mover("pcm")
+    # pcm = objs.get_mover("pcm")
 
     jobs = [l.rstrip("\n").split("\t") for l in Path(args.jobs_tsv).read_text().splitlines() if l.strip()]
     n_fail = 0
