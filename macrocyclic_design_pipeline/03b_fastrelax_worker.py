@@ -73,7 +73,7 @@ def terminus_gap(pose, chain_a):
     return (n_xyz - c_xyz).norm()
 
 
-def run_job(in_pdb, fasta, out_pdb, pcm, fr):
+def run_job(in_pdb, fasta, out_pdb, fr):
     seq = read_designed_sequence(fasta)
 
     raw_lines = Path(in_pdb).read_text().splitlines()
@@ -158,7 +158,8 @@ def main():
     for k, (in_pdb, fasta, out_pdb) in enumerate(jobs, 1):
         print(f"[{k}/{len(jobs)}] {in_pdb}", flush=True)
         try:
-            run_job(in_pdb, fasta, out_pdb, pcm, fr)
+            # run_job(in_pdb, fasta, out_pdb, pcm, fr)
+            run_job(in_pdb, fasta, out_pdb, fr)
         except Exception:
             n_fail += 1
             print(f"[WARN] job failed for {in_pdb}:", flush=True)
