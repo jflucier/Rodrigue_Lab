@@ -95,6 +95,9 @@ for IDX in $(seq "${START}" "${END}"); do
     ATTEMPT=1
     SUCCESS=false
     
+    BIAS_JSON="${ROUND_DIR}/bias_AA.json"
+    echo '{"S": 0.8}' > "${BIAS_JSON}"
+    
     while [ "${ATTEMPT}" -le "${MAX_ATTEMPTS}" ]; do
         if ! singularity exec --nv --pwd /tmp -B __BIND_PATH__ __SIF__ \
             python3 "${MPNN_SCRIPT}" \
@@ -103,7 +106,7 @@ for IDX in $(seq "${START}" "${END}"); do
             --sampling_temp "${TEMP}" \
             --backbone_noise "0" \
             --omit_AAs "C" \
-            --bias_AAs "S:0.8" \
+            --bias_AA_jsonl "${BIAS_JSON}" \
             --num_seq_per_target 1 \
             --path_to_model_weights "${MPNN_WEIGHTS}" \
             --out_folder "${ROUND_DIR}"; then
