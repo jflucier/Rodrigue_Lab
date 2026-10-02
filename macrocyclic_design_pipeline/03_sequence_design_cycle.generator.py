@@ -107,7 +107,7 @@ for IDX in $(seq "${START}" "${END}"); do
             --backbone_noise "0" \
             --omit_AAs "C" \
             --bias_AA_jsonl "${BIAS_JSON}" \
-            --num_seq_per_target 1 \
+            --num_seq_per_target 20 \
             --path_to_model_weights "${MPNN_WEIGHTS}" \
             --out_folder "${ROUND_DIR}"; then
             echo "[WARN] ${STEM}: ProteinMPNN failed on attempt ${ATTEMPT} in round ${ROUND}"
@@ -121,50 +121,58 @@ for IDX in $(seq "${START}" "${END}"); do
             break
         fi
         
-        # ProteinMPNN FASTA format: Line 4 is the designed sequence.
-        # We isolate Chain A by splitting off anything after a slash '/' character.
-        DESIGNED_SEQ=$(awk 'NR==4' "${FASTA_FILE}" | cut -d'/' -f1)
-
-        # Count the number of 'S' (Serine) characters in the isolated macrocycle string
-        SERINE_COUNT=$(echo "${DESIGNED_SEQ}" | tr -cd 'S' | wc -c)
+        MATCH_FOUND=false
+        CLEAN_FASTA_CONTENT=""
         
-        HAS_LINEAR_PS=false
-        if [[ "${DESIGNED_SEQ}" == *"PS"* ]]; then
-            HAS_LINEAR_PS=true
-        fi
+        # Store native reference info (first 2 lines of ProteinMPNN output)
+        NATIVE_HEADER=$(awk 'NR==1' "${FASTA_FILE}")
+        NATIVE_SEQ=$(awk 'NR==2' "${FASTA_FILE}")
         
-        HAS_CYCLIC_PS=false
-        if [[ "${DESIGNED_SEQ}" == S* && "${DESIGNED_SEQ}" == *P ]]; then
-            HAS_CYCLIC_PS=true
-        fi
-
-        if [ "${SERINE_COUNT}" -eq 1 ] && [ "${HAS_LINEAR_PS}" = false ] && [ "${HAS_CYCLIC_PS}" = false ]; then
-            echo "  --> [SUCCESS] Attempt ${ATTEMPT} (T=${TEMP}): Sequence satisfies all rules (${DESIGNED_SEQ})"
+        TOTAL_LINES=$(wc -l < "${FASTA_FILE}")
+        for (( l=3; l<=${TOTAL_LINES}; l+=2 )); do
+            H_IDX=$l
+            S_IDX=$((l+1))
+            
+            H_LINE=$(awk "NR==${H_IDX}" "${FASTA_FILE}")
+            S_LINE=$(awk "NR==${S_IDX}" "${FASTA_FILE}")
+            
+            # Isolate Chain A sequence
+            DESIGNED_SEQ=$(echo "${S_LINE}" | cut -d'/' -f1)
+            
+            SERINE_COUNT=$(echo "${DESIGNED_SEQ}" | tr -cd 'S' | wc -c)
+            HAS_LINEAR_PS=false; [[ "${DESIGNED_SEQ}" == *"PS"* ]] && HAS_LINEAR_PS=true
+            HAS_CYCLIC_PS=false; [[ "${DESIGNED_SEQ}" == S* && "${DESIGNED_SEQ}" == *P ]] && HAS_CYCLIC_PS=true
+            
+            if [ "${SERINE_COUNT}" -eq 1 ] && [ "${HAS_LINEAR_PS}" = false ] && [ "${HAS_CYCLIC_PS}" = false ]; then
+                echo "  --> Found valid sequence in batch generation: ${DESIGNED_SEQ}"
+                # Reconstruct a clean, standard 1-sample FASTA file for PyRosetta worker compatibility
+                CLEAN_FASTA_CONTENT="${NATIVE_HEADER}\n${NATIVE_SEQ}\n${H_LINE}\n${S_LINE}"
+                MATCH_FOUND=true
+                break
+            fi
+        done
+        
+        if [ "${MATCH_FOUND}" = true ]; then
+            # Overwrite the multi-sequence batch file with our pristine single constrained sequence
+            echo -e "${CLEAN_FASTA_CONTENT}" > "${FASTA_FILE}"
             SUCCESS=true
             break
         else
-            # Print explicit debugging reasons to your slurm log file
-            REASON=""
-            [ "${SERINE_COUNT}" -ne 1 ] && REASON="Has ${SERINE_COUNT} Serines (wants 1)."
-            [ "${HAS_LINEAR_PS}" = true ] && REASON="Contains forbidden linear PS motif."
-            [ "${HAS_CYCLIC_PS}" = true ] && REASON="Contains forbidden cyclic head-to-tail P->S layout."
-            
-            echo "  --> [REJECT] Attempt ${ATTEMPT} (T=${TEMP}): ${REASON} Resampling..."
-            
-            # Wipe folder markers to clear space for the next generation trial
+            echo "[ERROR] ${STEM}: No sequence in the 20-sample batch satisfied your criteria at T=${TEMP}."
             rm -rf "${ROUND_DIR}/seqs" "${ROUND_DIR}/scores"
-            
-            # Increase temperature to spark sidechain distribution diversity on subsequent tries
-            if [ "${ATTEMPT}" -eq 1 ]; then
-                TEMP="0.02"
-            else
-                # Scale up gradually using bc for floating-point math
-                TEMP=$(awk -v t="${TEMP}" 'BEGIN {print t + 0.02}')
-            fi
-            ATTEMPT=$(( ATTEMPT + 1 ))
         fi
+        
+        # Increase temperature to spark sidechain distribution diversity on subsequent tries
+        if [ "${ATTEMPT}" -eq 1 ]; then
+            TEMP="0.02"
+        else
+            # Scale up gradually using bc for floating-point math
+            TEMP=$(awk -v t="${TEMP}" 'BEGIN {print t + 0.02}')
+        fi
+        ATTEMPT=$(( ATTEMPT + 1 ))
     done
     
+    rm -f "${BIAS_JSON}"
     if [ "${SUCCESS}" = false ]; then
         echo "[ERROR] ${STEM}: Failed composition constraint of exactly 1 Serine after ${MAX_ATTEMPTS} attempts."
         # Clean folder markers to allow manual or automated workflow re-triggers
