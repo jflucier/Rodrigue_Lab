@@ -17,6 +17,13 @@ from the observed iPAE distribution, see Methods 2.3) -- treat the defaults
 below as starting points, not universal constants, and re-derive them from
 your own iPAE histograms per target.
 
+Chain convention: macrocycle = chain A, target = chain B, for every input
+PDB -- this matches the pipeline's chain-normalization step
+(02b_normalize_chains.py), which runs right after backbone generation and
+makes this true regardless of what RFdiffusion originally emitted. If
+you're running this on PDBs that bypassed that step, re-check which chain
+is actually which before trusting these binder_chain/target_chain values.
+
 Requires ColabDesign installed with AfCycDesign's add_cyclic_offset patch:
 https://colab.research.google.com/github/sokrypton/ColabDesign/blob/main/af/examples/af_cyc_design.ipynb
 
@@ -57,8 +64,8 @@ def predict_one(pdb_path: Path, out_dir: Path):
     model = mk_afdesign_model("binder")
     model.prep_inputs(
         str(pdb_path),
-        binder_chain="B",
-        target_chain="A",
+        binder_chain="A",   # macrocycle, post-02b_normalize_chains.py
+        target_chain="B",   # target, post-02b_normalize_chains.py
         use_binder_template=False,
         use_multimer=True,
         use_initial_guess=True,
@@ -81,8 +88,8 @@ def main():
                                   formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--designs-dir", required=True,
                      help="Directory of cyclized, sequence-designed complex PDBs "
-                          "(chain A = target per paper's convention here, chain B = macrocycle "
-                          "-- adjust to match script 03's output chain order)")
+                          "(chain A = macrocycle, chain B = target, per "
+                          "02b_normalize_chains.py's convention)")
     ap.add_argument("--out-csv", default="afcyc_scores.csv")
     ap.add_argument("--norm-ipae-cutoff", type=float, default=0.20)
     ap.add_argument("--rmsd-cutoff", type=float, default=1.5)
