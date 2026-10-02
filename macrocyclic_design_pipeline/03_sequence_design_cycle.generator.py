@@ -89,18 +89,85 @@ for IDX in $(seq "${START}" "${END}"); do
     mkdir -p "${ROUND_DIR}"
 
     echo "[${STEM}] round ${ROUND}: ProteinMPNN"
-    if ! singularity exec --nv --pwd /tmp -B __BIND_PATH__ __SIF__ \
-        python3 "${MPNN_SCRIPT}" \
-        --pdb_path "${CURRENT_PDB}" \
-        --pdb_path_chains "A" \
-        --sampling_temp "0.0001" \
-        --backbone_noise "0" \
-        --omit_AAs "C" \
-        --num_seq_per_target 1 \
-        --path_to_model_weights "${MPNN_WEIGHTS}" \
-        --out_folder "${ROUND_DIR}"; then
-        echo "[WARN] ${STEM}: ProteinMPNN failed in round ${ROUND}"
+    
+    TEMP="0.0001"
+    MAX_ATTEMPTS=8
+    ATTEMPT=1
+    SUCCESS=false
+    
+    while [ "${ATTEMPT}" -le "${MAX_ATTEMPTS}" ]; do
+        if ! singularity exec --nv --pwd /tmp -B __BIND_PATH__ __SIF__ \
+            python3 "${MPNN_SCRIPT}" \
+            --pdb_path "${CURRENT_PDB}" \
+            --pdb_path_chains "A" \
+            --sampling_temp "${TEMP}" \
+            --backbone_noise "0" \
+            --omit_AAs "C" \
+            --bias_AAs "S:0.8" \
+            --num_seq_per_target 1 \
+            --path_to_model_weights "${MPNN_WEIGHTS}" \
+            --out_folder "${ROUND_DIR}"; then
+            echo "[WARN] ${STEM}: ProteinMPNN failed on attempt ${ATTEMPT} in round ${ROUND}"
+            break
+        fi
+
+        # Locate the newly generated FASTA file
+        FASTA_FILE="${ROUND_DIR}/seqs/$(basename "${CURRENT_PDB}" .pdb).fa"
+        if [ ! -f "${FASTA_FILE}" ]; then
+            echo "[WARN] ${STEM}: Expected fasta output ${FASTA_FILE} missing."
+            break
+        fi
+        
+        # ProteinMPNN FASTA format: Line 4 is the designed sequence.
+        # We isolate Chain A by splitting off anything after a slash '/' character.
+        DESIGNED_SEQ=$(awk 'NR==4' "${FASTA_FILE}" | cut -d'/' -f1)
+
+        # Count the number of 'S' (Serine) characters in the isolated macrocycle string
+        SERINE_COUNT=$(echo "${DESIGNED_SEQ}" | tr -cd 'S' | wc -c)
+        
+        HAS_LINEAR_PS=false
+        if [[ "${DESIGNED_SEQ}" == *"PS"* ]]; then
+            HAS_LINEAR_PS=true
+        fi
+        
+        HAS_CYCLIC_PS=false
+        if [[ "${DESIGNED_SEQ}" == S* && "${DESIGNED_SEQ}" == *P ]]; then
+            HAS_CYCLIC_PS=true
+        fi
+
+        if [ "${SERINE_COUNT}" -eq 1 ] && [ "${HAS_LINEAR_PS}" = false ] && [ "${HAS_CYCLIC_PS}" = false ]; then
+            echo "  --> [SUCCESS] Attempt ${ATTEMPT} (T=${TEMP}): Sequence satisfies all rules (${DESIGNED_SEQ})"
+            SUCCESS=true
+            break
+        else
+            # Print explicit debugging reasons to your slurm log file
+            REASON=""
+            [ "${SERINE_COUNT}" -ne 1 ] && REASON="Has ${SERINE_COUNT} Serines (wants 1)."
+            [ "${HAS_LINEAR_PS}" = true ] && REASON="Contains forbidden linear PS motif."
+            [ "${HAS_CYCLIC_PS}" = true ] && REASON="Contains forbidden cyclic head-to-tail P->S layout."
+            
+            echo "  --> [REJECT] Attempt ${ATTEMPT} (T=${TEMP}): ${REASON} Resampling..."
+            
+            # Wipe folder markers to clear space for the next generation trial
+            rm -rf "${ROUND_DIR}/seqs" "${ROUND_DIR}/scores"
+            
+            # Increase temperature to spark sidechain distribution diversity on subsequent tries
+            if [ "${ATTEMPT}" -eq 1 ]; then
+                TEMP="0.02"
+            else
+                # Scale up gradually using bc for floating-point math
+                TEMP=$(echo "${TEMP} + 0.02" | bc)
+            fi
+            ATTEMPT=$(( ATTEMPT + 1 ))
+        fi
+    done
+    
+    if [ "${SUCCESS}" = false ]; then
+        echo "[ERROR] ${STEM}: Failed composition constraint of exactly 1 Serine after ${MAX_ATTEMPTS} attempts."
+        # Clean folder markers to allow manual or automated workflow re-triggers
+        rm -rf "${ROUND_DIR}"
     fi
+    
 done
 """
 
