@@ -152,7 +152,7 @@ for IDX in $(seq "${START}" "${END}"); do
             HAS_CYCLIC_PS=false; [[ "${DESIGNED_SEQ}" == S* && "${DESIGNED_SEQ}" == *P ]] && HAS_CYCLIC_PS=true
             
             if [ "${SERINE_COUNT}" -eq 1 ] && [ "${HAS_LINEAR_PS}" = false ] && [ "${HAS_CYCLIC_PS}" = false ]; then
-                echo "  --> Found valid sequence in batch generation: ${DESIGNED_SEQ}"
+                echo "  --> Found valid sequence in batch generation: ${DESIGNED_SEQ} at temp=${TEMP}"
                 # Reconstruct a clean, standard 1-sample FASTA file for PyRosetta worker compatibility
                 CLEAN_FASTA_CONTENT="${NATIVE_HEADER}\n${NATIVE_SEQ}\n${H_LINE}\n${S_LINE}"
                 MATCH_FOUND=true
