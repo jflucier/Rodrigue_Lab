@@ -178,7 +178,11 @@ def run_job(in_pdb, fasta, out_pdb, fr):
 
     sio = StringIO()
     pose.dump_pdb(sio)
-    rosetta_lines = sio.getvalue().splitlines()
+
+    Path(out_pdb).parent.mkdir(parents=True, exist_ok=True)
+    pose.dump_pdb(out_pdb)
+
+    rosetta_lines = Path(out_pdb).read_text().splitlines()
 
     # 2. Filter out non-standard structural records (like pose energy tables)
     clean_pdb_lines = [
@@ -186,12 +190,7 @@ def run_job(in_pdb, fasta, out_pdb, fr):
         if line.startswith(("ATOM", "HETATM", "TER", "ENDMDL", "END"))
     ]
 
-    # 3. Save a clean, standard PDB file that downstream tools can parse perfectly
-    Path(out_pdb).parent.mkdir(parents=True, exist_ok=True)
     Path(out_pdb).write_text("\n".join(clean_pdb_lines))
-
-    # Path(out_pdb).parent.mkdir(parents=True, exist_ok=True)
-    # pose.dump_pdb(out_pdb)
 
 
 def main():
