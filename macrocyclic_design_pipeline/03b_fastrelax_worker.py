@@ -84,6 +84,10 @@ def load_pose_with_ter_fix(pdb_path):
     last_chain = None
 
     for line in raw_lines:
+        # Strip out any old LINK or CONECT records written by previous rounds
+        if line.startswith(("LINK", "CONECT")):
+            continue
+            
         if line.startswith("ATOM  "):
             current_chain = line[21]  # Extract Chain ID column
             if last_chain == "A" and current_chain == "B":
@@ -136,18 +140,6 @@ def run_job(in_pdb, fasta, out_pdb, fr):
     if len(seq) != len(chain_a):
         raise ValueError(f"designed seq length {len(seq)} != chain A length "
                          f"{len(chain_a)} in {in_pdb}")
-    # bad = sorted(set(seq) - set(AA_1TO3))
-    # if bad:
-    #     raise ValueError(f"non-standard characters in designed sequence: {bad}")
-
-    # gap = terminus_gap(pose, chain_a)
-    # print(f"  threading {seq} onto chain A ({len(chain_a)} res), "
-    #       f"N-C terminus gap = {gap:.2f} A (expect ~1.3 A for a closed bond)",
-    #       flush=True)
-    # if gap > 3.0:
-    #     print(f"  [NOTE] gap is large -- this backbone's termini likely never "
-    #           f"closed during RFdiffusion sampling; a cyclization failure below "
-    #           f"is expected for this one, not a pipeline bug", flush=True)
 
     mutator = MutateResidue()
     for pose_idx, aa in zip(chain_a, seq):
@@ -155,8 +147,6 @@ def run_job(in_pdb, fasta, out_pdb, fr):
         mutator.set_res_name(AA_1TO3[aa])
         mutator.apply(pose)
 
-    # 2. OVERRIDE THE XML AUTO-DETECTION: Explicitly lock the 13-residue cycle
-    # Syntax: CyclizationMover( chain_number, add_constraints, minimize, build_conformation )
     python_cyclizer = CyclizationMover(1, True, True, 1)
     python_cyclizer.apply(pose)
 
