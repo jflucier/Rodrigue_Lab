@@ -159,7 +159,7 @@ for IDX in $(seq "${START}" "${END}"); do
                 TEMP="0.02"
             else
                 # Scale up gradually using bc for floating-point math
-                TEMP=$(echo "${TEMP} + 0.02" | bc)
+                TEMP=$(awk -v t="${TEMP}" 'BEGIN {print t + 0.02}')
             fi
             ATTEMPT=$(( ATTEMPT + 1 ))
         fi
