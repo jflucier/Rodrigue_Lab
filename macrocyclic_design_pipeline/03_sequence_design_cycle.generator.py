@@ -64,6 +64,9 @@ START=$(( (SLURM_ARRAY_TASK_ID - 1) * CHUNK + 1 ))
 END=$(( SLURM_ARRAY_TASK_ID * CHUNK ))
 [ "${END}" -gt "${TOTAL}" ] && END=${TOTAL}
 
+CHUNK_TOTAL=$(( END - START + 1 ))
+CURRENT_COUNT=1
+
 echo "=== MPNN round ${ROUND}, task ${SLURM_ARRAY_TASK_ID}, backbones ${START}-${END} on $(hostname) ==="
 
 for IDX in $(seq "${START}" "${END}"); do
@@ -88,7 +91,12 @@ for IDX in $(seq "${START}" "${END}"); do
     fi
     mkdir -p "${ROUND_DIR}"
 
-    echo "[${STEM}] round ${ROUND}: ProteinMPNN"
+    # --- ADDED INCREMENTING BACKBONE PROGRESS TRACE ---
+    echo "=========================================================================="
+    echo "[Progress: ${CURRENT_COUNT}/${CHUNK_TOTAL}] Processing backbone: ${STEM}"
+    echo "=========================================================================="
+    echo "[${STEM}] round ${ROUND}: ProteinMPNN Batch Constraint Solver"
+    
     
     TEMP="0.0001"
     MAX_ATTEMPTS=8
@@ -179,6 +187,7 @@ for IDX in $(seq "${START}" "${END}"); do
         rm -rf "${ROUND_DIR}"
     fi
     
+    CURRENT_COUNT=$(( CURRENT_COUNT + 1 ))    
 done
 """
 
