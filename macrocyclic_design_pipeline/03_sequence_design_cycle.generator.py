@@ -67,7 +67,7 @@ END=$(( SLURM_ARRAY_TASK_ID * CHUNK ))
 CHUNK_TOTAL=$(( END - START + 1 ))
 CURRENT_COUNT=1
 
-echo "=== MPNN round ${ROUND}, task ${SLURM_ARRAY_TASK_ID}, backbones ${START}-${END} on $(hostname) ==="
+echo "=== MPNN round ${ROUND}, task ${SLURM_ARRAY_TASK_ID}, backbones ${START}-${END} ==="
 
 for IDX in $(seq "${START}" "${END}"); do
     STEM=$(awk -F'\t' -v n="${IDX}" 'NR==n{print $1}' "${LIST}")
@@ -189,6 +189,8 @@ for IDX in $(seq "${START}" "${END}"); do
     
     CURRENT_COUNT=$(( CURRENT_COUNT + 1 ))    
 done
+
+echo "Done MPNN round ${ROUND}, task ${SLURM_ARRAY_TASK_ID}, backbones ${START}-${END} "
 """
 
 RELAX_TEMPLATE = r"""#!/bin/bash
