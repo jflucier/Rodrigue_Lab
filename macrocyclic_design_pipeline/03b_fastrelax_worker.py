@@ -176,9 +176,6 @@ def run_job(in_pdb, fasta, out_pdb, fr):
     # 4. Re-verify the loop constraints at the true 13-residue index endpoint
     python_cyclizer.apply(pose)
 
-    sio = StringIO()
-    pose.dump_pdb(sio)
-
     Path(out_pdb).parent.mkdir(parents=True, exist_ok=True)
     pose.dump_pdb(out_pdb)
 
