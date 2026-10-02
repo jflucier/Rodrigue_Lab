@@ -87,6 +87,7 @@ for IDX in $(seq "${START}" "${END}"); do
     ROUND_DIR="${OUT}/${STEM}/round${ROUND}"
     if ls "${ROUND_DIR}"/seqs/*.fa > /dev/null 2>&1; then
         echo "[${STEM}] round ${ROUND} MPNN output exists, skipping"
+        CURRENT_COUNT=$(( CURRENT_COUNT + 1 ))
         continue
     fi
     mkdir -p "${ROUND_DIR}"
