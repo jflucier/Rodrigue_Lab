@@ -51,3 +51,31 @@ From: nvcr.io/nvidia/cuda:12.2.2-cudnn8-runtime-ubuntu22.04
 %runscript
     # Allows executing scripts programmatically via: singularity run --nv container.sif script.py
     exec python3 "$@"
+
+%test
+    echo "============================================================"
+    echo "🔍 RUNNING BUILD-TIME CONTAINER INTEGRITY CHECKS"
+    echo "============================================================"
+
+    # 1. Verify AlphaFold Parameters exist on disk
+    if [ -d "/opt/ColabDesign/params" ] && [ "$(ls -A /opt/ColabDesign/params/*.npz 2>/dev/null)" ]; then
+        echo "  --> [PASS] AlphaFold .npz parameter files verified."
+    else
+        echo "  --> [FAIL] Essential AlphaFold .npz parameter records missing!"
+        exit 1
+    fi
+
+    # 2. Verify Python imports and JAX architecture availability
+    python3 -c "
+import sys
+try:
+    import jax
+    import colabdesign
+    print(f'  --> [PASS] JAX Version {jax.__version__} and ColabDesign imported cleanly.')
+except ImportError as e:
+    print(f'  --> [FAIL] Package import error occurred: {e}')
+    sys.exit(1)
+"
+    echo "============================================================"
+    echo "🎉 ALL INTEGRITY CHECKS PASSED SUCCESSFULLY"
+    echo "============================================================"

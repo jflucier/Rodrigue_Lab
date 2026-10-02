@@ -72,3 +72,7 @@ python3 /opt/proteinmpnn/protein_mpnn_run.py \
         --sampling_temp "0.1" \
         --seed 37 \
         --batch_size 1
+
+# build afcycdesign
+salloc --partition=gh-bio --account=def-rodrigu1 --time=10:00:00 --gres=gpu:1 --cpus-per-task=16 --mem=100G
+singularity build --fakeroot afcycdesign_gh200.sif afcycdesign_gh200.def
