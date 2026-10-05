@@ -1,71 +1,114 @@
 Bootstrap: docker
-From: nvcr.io/nvidia/cuda:12.2.2-cudnn8-runtime-ubuntu22.04
+From: nvcr.io/nvidia/cuda:12.2.2-runtime-ubuntu22.04
+
+# afcycdesign_gh200.def
+#
+# ColabDesign/AfCycDesign container for step 4 of the macrocycle pipeline.
+# GH200 is aarch64 -- unlike PyRosetta (no linux/aarch64 wheel, hence the
+# from-source Rosetta build), JAX's pip CUDA wheels DO support aarch64+GPU
+# (confirmed against JAX's install docs: "JAX provides pre-built
+# CUDA-compatible wheels for Linux x86_64 and Linux aarch64 only"), so a
+# plain pip install is the right approach here, not a from-source build.
 
 %post
+    set -e   # abort the build on any failed command -- a truncated/partial
+             # AlphaFold params download (a known, documented failure mode
+             # for this exact 5.2GB file -- see martinpacesa/BindCraft#54)
+             # must not be allowed to silently produce a "successful" image
+             # with broken or incomplete weights.
     export DEBIAN_FRONTEND=noninteractive
 
-    # 1. Install necessary system build tools and structural animation packages
+    # 1. Install necessary system build tools
     apt-get update && apt-get install -y \
         git wget cmake build-essential \
         python3-pip python3-dev python3-venv \
-        kalign \
         && rm -rf /var/lib/apt/lists/*
 
     # 2. Upgrade pip and optimize core Python environment parameters
     pip3 install --no-cache-dir --upgrade pip setuptools wheel
 
-    # 3. Install JAX with explicit CUDA 12 support for GPU acceleration
+    # 3. Install JAX with explicit CUDA 12 support for GPU acceleration.
+    # Modern JAX (jaxlib >=0.4.30, since the "plugin-based" CUDA install
+    # became mandatory) manages its own CUDA/cuDNN via pip dependencies
+    # (nvidia-cudnn-cu12 etc.) rather than relying on the base image's
+    # system cuDNN -- which is why this uses a plain `-runtime` base image
+    # with no cudnn package baked in, rather than a `-cudnnN-runtime`
+    # variant: a system-installed cuDNN alongside jax's own pip-installed
+    # one is an unnecessary potential version-conflict source, not a
+    # requirement. For reproducibility across a multi-month campaign, pin a
+    # specific version instead of always tracking latest -- check
+    # https://pypi.org/project/jax/#history for a current release before
+    # picking one (left unpinned here rather than guess a number: this file
+    # was written Oct 2026 and jax ships fast enough that any version typed
+    # in without checking that page first would likely already be stale).
     pip3 install --no-cache-dir "jax[cuda12]"
 
-    # 4. Clone and install ColabDesign (including sidechain rotamer modules)
+    # 4. Clone and install ColabDesign. Pinned to a specific commit, not
+    # `main`, so the environment doesn't silently drift under you between
+    # builds -- check https://github.com/sokrypton/ColabDesign/commits/main
+    # for a current commit and update this if you want a newer one.
     git clone https://github.com/sokrypton/ColabDesign.git /opt/ColabDesign
     cd /opt/ColabDesign
+    git checkout 6d3837d94a63df561e73477dfdd553b0cf894a90
     pip3 install --no-cache-dir .
 
     # 5. Pre-download AlphaFold v2 weights inside the container
-    # This prevents worker nodes from timing out or hitting networking bottlenecks mid-simulation
     mkdir -p /opt/ColabDesign/params
     cd /opt/ColabDesign/params
 
     echo "Downloading AlphaFold structural parameters..."
-    # Download the essential multi-chain and monomer v2 parameter tracks
-    wget -q https://storage.googleapis.com/alphafold/alphafold_params_2022-12-06.tar
-    tar -xf alphafold_params_2022-12-06.tar
-    rm -f alphafold_params_2022-12-06.tar
+    PARAMS_URL="https://storage.googleapis.com/alphafold/alphafold_params_2022-12-06.tar"
+    PARAMS_TAR="alphafold_params_2022-12-06.tar"
+    EXPECTED_SIZE=5587968000   # bytes, from the known-good download in BindCraft#54
 
-    if [ -d "alphafold" ]; then
-        mv alphafold/* .
-        rm -rf alphafold
+    wget --tries=3 -O "${PARAMS_TAR}" "${PARAMS_URL}"
+
+    ACTUAL_SIZE=$(stat -c%s "${PARAMS_TAR}")
+    if [ "${ACTUAL_SIZE}" -ne "${EXPECTED_SIZE}" ]; then
+        echo "CRITICAL: downloaded params tar is ${ACTUAL_SIZE} bytes, expected ${EXPECTED_SIZE}."
+        echo "Download was truncated or the upstream file changed -- aborting build rather "
+        echo "than ship a container with broken/partial AlphaFold weights."
+        exit 1
+    fi
+
+    tar -xf "${PARAMS_TAR}"
+    rm -f "${PARAMS_TAR}"
+
+    N_NPZ=$(ls -1 *.npz 2>/dev/null | wc -l)
+    echo "Extracted ${N_NPZ} .npz parameter files."
+    if [ "${N_NPZ}" -lt 1 ]; then
+        echo "CRITICAL: no .npz files after extraction."
+        exit 1
     fi
 
 %environment
     export LC_ALL=C
-    # Set paths so Python can discover ColabDesign weights and libraries instantly
     export PYTHONPATH=/opt/ColabDesign:$PYTHONPATH
     export ALPHAFOLD_PARAMS_PATH=/opt/ColabDesign/params
 
-    # Force JAX/XLA to optimize GPU memory allocation flags on high-throughput clusters
     export XLA_PYTHON_CLIENT_PREALLOCATE=true
     export XLA_PYTHON_CLIENT_MEM_FRACTION=0.85
 
 %runscript
-    # Allows executing scripts programmatically via: singularity run --nv container.sif script.py
     exec python3 "$@"
 
 %test
+    set -e
     echo "============================================================"
-    echo "🔍 RUNNING BUILD-TIME CONTAINER INTEGRITY CHECKS"
+    echo "RUNNING BUILD-TIME CONTAINER INTEGRITY CHECKS"
     echo "============================================================"
 
-    # 1. Verify AlphaFold Parameters exist on disk
-    if [ -d "/opt/ColabDesign/params" ] && [ "$(ls -A /opt/ColabDesign/params/*.npz 2>/dev/null)" ]; then
-        echo "  --> [PASS] AlphaFold .npz parameter files verified."
-    else
-        echo "  --> [FAIL] Essential AlphaFold .npz parameter records missing!"
+    # 1. Verify AlphaFold parameter file COUNT, not just "at least one file"
+    N_NPZ=$(ls -1 /opt/ColabDesign/params/*.npz 2>/dev/null | wc -l)
+    echo "  --> found ${N_NPZ} .npz parameter files"
+    if [ "${N_NPZ}" -lt 10 ]; then
+        echo "  --> [FAIL] Expected many .npz files (monomer + multimer model sets); "
+        echo "             only ${N_NPZ} found -- extraction likely incomplete."
         exit 1
     fi
+    echo "  --> [PASS] AlphaFold .npz parameter files verified."
 
-    # 2. Verify Python imports and JAX architecture availability
+    # 2. Verify Python imports (NOT a GPU check -- see note below)
     python3 -c "
 import sys
 try:
@@ -77,5 +120,10 @@ except ImportError as e:
     sys.exit(1)
 "
     echo "============================================================"
-    echo "🎉 ALL INTEGRITY CHECKS PASSED SUCCESSFULLY"
+    echo "ALL BUILD-TIME INTEGRITY CHECKS PASSED"
     echo "============================================================"
+    echo "NOTE: this does NOT confirm GPU/CUDA actually works -- 'apptainer build'"
+    echo "runs %test without GPU access, so jax.devices() would show CPU-only here"
+    echo "even on a correctly-built image. Confirm GPU separately, after build, with:"
+    echo "  apptainer exec --nv afcycdesign_gh200.sif python3 -c \"import jax; print(jax.devices())\""
+    echo "and check the output lists a CudaDevice / GpuDevice, not just CPU."

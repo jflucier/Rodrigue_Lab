@@ -31,7 +31,11 @@ OUT="__OUT__"
 LIST="${OUT}/backbones.list"
 CHUNK=__CHUNK__
 CONTAINER_SIF="__SIF__"
-GLOBAL_CSV="${OUT}/logs/afcyc_filter_summary_r${ROUND}.csv"
+# Per-task CSV, not shared across the array -- see note in script docstring.
+# SLURM_ARRAY_TASK_ID is unique and deterministic per (round, chunk), so this
+# also gives resume-safety for free: rerunning the same round+task re-reads
+# only its own prior output, never a file another task might be writing to.
+TASK_CSV="${OUT}/logs/afcyc_r${ROUND}_task${SLURM_ARRAY_TASK_ID}.csv"
 
 TOTAL=$(wc -l < "${LIST}")
 START=$(( (SLURM_ARRAY_TASK_ID - 1) * CHUNK + 1 ))
@@ -75,7 +79,7 @@ if [ -s "${JOBS_TSV}" ]; then
     singularity exec --nv -B __BIND_PATH__ "${CONTAINER_SIF}" \
         python3 "__OUT__/04_afcycdesign_filter.py" \
         --jobs-tsv "${JOBS_TSV}" \
-        --out-csv "${GLOBAL_CSV}" \
+        --out-csv "${TASK_CSV}" \
         --norm-ipae-cutoff __IPAE_CUTOFF__ \
         --rmsd-cutoff __RMSD_CUTOFF__ \
         --plddt-cutoff __PLDDT_CUTOFF__
@@ -111,7 +115,7 @@ if [ $# -gt 0 ]; then
 fi
 
 echo "=========================================================================="
-echo "🚀 SUBMITTING ALL AFCYCDESIGN EVALUATION ARRAYS SIMULTANEOUSLY"
+echo "SUBMITTING ALL AFCYCDESIGN EVALUATION ARRAYS SIMULTANEOUSLY"
 echo "=========================================================================="
 
 for ROUND in $(seq 1 "${N_ROUNDS}"); do
@@ -122,7 +126,9 @@ for ROUND in $(seq 1 "${N_ROUNDS}"); do
 done
 
 echo "=========================================================================="
-echo "🎉 All design iterations are now crunching in parallel on the cluster!"
+echo "All design iterations are now crunching in parallel on the cluster!"
+echo "Once arrays finish, merge per-task CSVs with 04c_merge_afcyc_csvs.py before"
+echo "running 04b_derive_target_cutoff.py."
 echo "=========================================================================="
 """
 
@@ -136,7 +142,9 @@ def fill(template, mapping):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--backbones-dir", required=True, help="Directory containing origin validation structural tracks")
-    ap.add_argument("--out-dir", required=True, help="Centralized pipeline working array output tree path")
+    ap.add_argument("--out-dir", required=True, help="Centralized pipeline working array output tree path -- "
+                    "must be the SAME --out-dir used for step 3 (03_sequence_design_cycle.py), "
+                    "since this reads step 3's per-round outputs from it")
     ap.add_argument("--sif", "--colabdesign-sif", dest="sif", required=True,
                     help="SIF container containing JAX, CUDA, and ColabDesign libraries")
     ap.add_argument("--n-rounds", type=int, default=4, help="Total sequence-design iterations executed across the loop")
@@ -173,6 +181,10 @@ def main():
 
     backbones_list_file = out_path / "backbones.list"
     if not backbones_list_file.exists():
+        print(f"[WARN] {backbones_list_file} did not already exist -- writing a fresh one from "
+              f"--backbones-dir. If --out-dir was supposed to be step 3's output directory, "
+              f"this is a sign it's pointed at the wrong place: step 3 always writes this file, "
+              f"so a missing one here usually means a path mistake, not a fresh campaign.")
         backbones_list_file.write_text("".join(f"{p.stem}\t{p.resolve()}\n" for p in pdbs))
 
     n_tasks = math.ceil(len(pdbs) / args.chunk_size)
@@ -204,13 +216,15 @@ def main():
     submit_script.chmod(0o755)
 
     print("\n" + "=" * 78)
-    print(" 🚀 AfCycDesign SLURM Screening Grid Cluster Layout Generated Successfully")
+    print(" AfCycDesign SLURM Screening Grid Cluster Layout Generated Successfully")
     print("=" * 78)
     print(f"Total Structural Targets Found : {len(pdbs)}")
     print(f"Total Parallel Iteration Loops : {args.n_rounds} Concurrent Design Rounds")
     print(f"Calculated Total Array Tasks   : {n_tasks} Tasks Per Round")
     print(
         f"Screening Metrics Setup Rules  : Norm iPAE < {args.norm_ipae_cutoff} | RMSD < {args.rmsd_cutoff}A | pLDDT > {args.plddt_cutoff}")
+    print(f"Each array task writes its OWN csv (afcyc_r<round>_task<n>.csv) -- merge "
+          f"with 04c_merge_afcyc_csvs.py once arrays finish.")
     print(f"Files written completely to    : {out_path}")
     print(f"\nLaunch ALL rounds simultaneously in parallel:\n  bash {submit_script}")
     print(f"\nLaunch a single isolated round manually (e.g. Round 3):\n  bash {submit_script} 3")
