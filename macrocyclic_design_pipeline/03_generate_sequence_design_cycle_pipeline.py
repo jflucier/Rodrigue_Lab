@@ -27,7 +27,7 @@ Per-backbone results: <out-dir>/<stem>/round<r>/<stem>_r<r>.pdb
 (final designs = round <n-rounds>).
 
 Usage:
-    python 03_sequence_design_cycle.generator.py --backbones-dir BB --out-dir OUT \
+    python 03_generate_sequence_design_cycle_pipeline.py --backbones-dir BB --out-dir OUT \
         --sif /path/combined.sif --n-rounds 4 [--submit]
 """
 import argparse
