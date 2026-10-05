@@ -4,7 +4,7 @@
 
 Generates a standalone SLURM Job Array layout to screen macrocycle-target
 complex architectures natively across cluster Grace Hopper GPU hardware node slots.
-Features complete strict residue-aware validation resume safety controls.
+Optimized for post-relaxed multi-round datasets where all files are already present.
 """
 import argparse
 import math
@@ -24,7 +24,7 @@ AFCYC_TEMPLATE = r"""#!/bin/bash
 #SBATCH --mem=__AFCYC_MEM__
 #SBATCH --time=__AFCYC_TIME__
 
-# Expects ROUND in the environment (set by submit_all.sh via --export).
+# Expects ROUND in the environment (set by submit_afcyc.sh via --export).
 set -uo pipefail
 
 OUT="__OUT__"
@@ -38,7 +38,7 @@ START=$(( (SLURM_ARRAY_TASK_ID - 1) * CHUNK + 1 ))
 END=$(( SLURM_ARRAY_TASK_ID * CHUNK ))
 [ "${END}" -gt "${TOTAL}" ] && END=${TOTAL}
 
-echo "=== AfCycDesign Prediction round ${ROUND}, task ${SLURM_ARRAY_TASK_ID}, backbones ${START}-${END} ==="
+echo "=== AfCycDesign Prediction round ${ROUND}, task ${SLURM_ARRAY_TASK_ID}, backbones ${START}-${END} on $(hostname) ==="
 
 # Define a unique worker-specific job file to prevent cross-talk on parallel threads
 JOBS_TSV="${OUT}/logs/afcyc_r${ROUND}_task${SLURM_ARRAY_TASK_ID}.tsv"
@@ -88,18 +88,42 @@ else
 fi
 """
 
-# --- SUBMITTER CHAIN STRING TEMPLATE ---
+# --- SUBMITTER CHAIN STRING TEMPLATE FOR SIMULTANEOUS PARALLEL SUBMISSIONS ---
 SUBMIT_TEMPLATE = r"""#!/bin/bash
-# submit_afcyc_round.sh
-# Automated submission driver to fire up screening passes
+# submit_afcyc.sh
+# Fires all evaluation arrays into Slurm simultaneously since data is pre-generated.
 set -uo pipefail
 
-ROUND="${1:-1}"
-echo "Submitting AfCycDesign array evaluation chain loop for Round ${ROUND}..."
+OUT="__OUT__"
+SLURM_FILE="${OUT}/afcyc_step.slurm"
+N_ROUNDS=__N_ROUNDS__
+MAX_CONC=__MAX_CONC__
+N_TASKS=__N_TASKS__
 
-sbatch --export=ALL,ROUND="${ROUND}" \
-       --array=1-__N_TASKS__%__MAX_CONC__ \
-       "__OUT__/afcyc_step.slurm"
+# If a round is passed as an argument, run only that single round standalone
+if [ $# -gt 0 ]; then
+    ROUND="$1"
+    echo "Submitting standalone AfCycDesign array evaluation for Round ${ROUND}..."
+    sbatch --export=ALL,ROUND="${ROUND}" \
+           --array=1-${N_TASKS}%${MAX_CONC} \
+           "${SLURM_FILE}"
+    exit 0
+fi
+
+echo "=========================================================================="
+echo "🚀 SUBMITTING ALL AFCYCDESIGN EVALUATION ARRAYS SIMULTANEOUSLY"
+echo "=========================================================================="
+
+for ROUND in $(seq 1 "${N_ROUNDS}"); do
+    echo "[*] Queueing Slurm Array for Round ${ROUND}/${N_ROUNDS}..."
+    sbatch --export=ALL,ROUND="${ROUND}" \
+           --array=1-${N_TASKS}%${MAX_CONC} \
+           "${SLURM_FILE}"
+done
+
+echo "=========================================================================="
+echo "🎉 All design iterations are now crunching in parallel on the cluster!"
+echo "=========================================================================="
 """
 
 
@@ -115,8 +139,7 @@ def main():
     ap.add_argument("--out-dir", required=True, help="Centralized pipeline working array output tree path")
     ap.add_argument("--sif", "--colabdesign-sif", dest="sif", required=True,
                     help="SIF container containing JAX, CUDA, and ColabDesign libraries")
-    ap.add_argument("--round", type=int, default=1,
-                    help="Active evaluation round tracker index targeting metrics sheets")
+    ap.add_argument("--n-rounds", type=int, default=4, help="Total sequence-design iterations executed across the loop")
     ap.add_argument("--max-backbones", type=int, default=None, help="Cap file evaluations to first N entries")
     ap.add_argument("--queue", default="gh-bio", help="Grace Hopper GPU cluster partition queue selector")
     ap.add_argument("--bind-path", default="/net/nfs-bio", help="External database mount directory hooks")
@@ -134,7 +157,7 @@ def main():
     ap.add_argument("--afcyc-time", default="12:00:00")
     ap.add_argument("--afcyc-mem", default="32G")
     ap.add_argument("--afcyc-cpus", type=int, default=4)
-    ap.add_argument("--submit", action="store_false", help="Launch orchestration tasks instantly upon file printout")
+    ap.add_argument("--submit", action="store_true", help="Launch orchestration tasks instantly upon file printout")
     args = ap.parse_args()
 
     backbones_path = Path(args.backbones_dir).resolve()
@@ -148,7 +171,6 @@ def main():
         pdbs = pdbs[:args.max_backbones]
         print(f"Capping dataset evaluation queue to first {len(pdbs)} backbones.")
 
-    # Verify or write the master listing file matching your generator configuration
     backbones_list_file = out_path / "backbones.list"
     if not backbones_list_file.exists():
         backbones_list_file.write_text("".join(f"{p.stem}\t{p.resolve()}\n" for p in pdbs))
@@ -166,6 +188,7 @@ def main():
         "AFCYC_CPUS": args.afcyc_cpus,
         "N_TASKS": n_tasks,
         "MAX_CONC": args.max_concurrent,
+        "N_ROUNDS": args.n_rounds,
 
         # Injected Custom Threshold Rules
         "IPAE_CUTOFF": args.norm_ipae_cutoff,
@@ -184,17 +207,17 @@ def main():
     print(" 🚀 AfCycDesign SLURM Screening Grid Cluster Layout Generated Successfully")
     print("=" * 78)
     print(f"Total Structural Targets Found : {len(pdbs)}")
-    print(f"Task Segments Chunk Size       : {args.chunk_size}")
-    print(f"Calculated Total Array Tasks   : {n_tasks}")
-    print(f"GPU Execution Node Partition   : {args.queue}")
+    print(f"Total Parallel Iteration Loops : {args.n_rounds} Concurrent Design Rounds")
+    print(f"Calculated Total Array Tasks   : {n_tasks} Tasks Per Round")
     print(
         f"Screening Metrics Setup Rules  : Norm iPAE < {args.norm_ipae_cutoff} | RMSD < {args.rmsd_cutoff}A | pLDDT > {args.plddt_cutoff}")
     print(f"Files written completely to    : {out_path}")
-    print(f"\nLaunch screening passes with commands:\n  bash {submit_script} {args.round}")
+    print(f"\nLaunch ALL rounds simultaneously in parallel:\n  bash {submit_script}")
+    print(f"\nLaunch a single isolated round manually (e.g. Round 3):\n  bash {submit_script} 3")
     print("=" * 78)
 
     if args.submit:
-        subprocess.run(["bash", str(submit_script), str(args.round)], check=True)
+        subprocess.run(["bash", str(submit_script)], check=True)
 
 
 if __name__ == "__main__":
