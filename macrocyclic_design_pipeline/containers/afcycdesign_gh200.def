@@ -43,7 +43,8 @@ From: nvcr.io/nvidia/cuda:12.2.2-runtime-ubuntu22.04
         "optax==0.2.3" \
         "dm-haiku==0.0.12" \
         "nvidia-cudnn-cu12" \
-        "nvidia-nccl-cu12"
+        "nvidia-nccl-cu12" \
+        "nvidia-cuda-nvcc-cu12"
 
 
     # 5. Pre-download AlphaFold v2 weights inside the container
@@ -80,12 +81,19 @@ From: nvcr.io/nvidia/cuda:12.2.2-runtime-ubuntu22.04
     export PYTHONPATH=/opt/ColabDesign:$PYTHONPATH
     export ALPHAFOLD_PARAMS_PATH=/opt/ColabDesign/params
 
-    # Dynamically resolve python's nvidia runtime variables (safe on all cluster shells)
+    # Resolve paths for local Python-packaged libraries
     export CUDNN_PATH=$(dirname $(python3 -c "import nvidia.cudnn; print(nvidia.cudnn.__file__)" 2>/dev/null || echo ""))
     export NCCL_PATH=$(dirname $(python3 -c "import nvidia.nccl; print(nvidia.nccl.__file__)" 2>/dev/null || echo ""))
+    export NVCC_PATH=$(dirname $(python3 -c "import nvidia.cuda_nvcc; print(nvidia.cuda_nvcc.__file__)" 2>/dev/null || echo ""))
 
+    # 1. Map cuDNN and NCCL into the runtime linker paths
     if [ -n "$CUDNN_PATH" ]; then
         export LD_LIBRARY_PATH="${CUDNN_PATH}/lib:${NCCL_PATH}/lib:${LD_LIBRARY_PATH}"
+    fi
+
+    # 2. Inject the Python-packaged ptxas path directly into the system binary path
+    if [ -n "$NVCC_PATH" ]; then
+        export PATH="${NVCC_PATH}/bin:${PATH}"
     fi
 
     # Core execution tuning for GH200 nodes
