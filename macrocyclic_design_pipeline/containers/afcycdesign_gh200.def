@@ -28,10 +28,11 @@ From: nvcr.io/nvidia/cuda:12.2.2-runtime-ubuntu22.04
     pip3 install --no-cache-dir --upgrade pip setuptools wheel
 
     # 3. Clone and install ColabDesign first
-    git clone https://github.com/sokrypton/ColabDesign.git /opt/ColabDesign
-    cd /opt/ColabDesign
-    git checkout 6d3837d94a63df561e73477dfdd553b0cf894a90
-    pip3 install --no-cache-dir .
+#    git clone https://github.com/sokrypton/ColabDesign.git /opt/ColabDesign
+    pip install --force-reinstall https://github.com/sokrypton/ColabDesign/archive/refs/tags/v1.1.3.tar.gz
+#    cd /opt/ColabDesign
+#    git checkout 6d3837d94a63df561e73477dfdd553b0cf894a90
+#    pip3 install --no-cache-dir .
 
     # 4. FORCE-PIN JAX & JAXLIB to Python 3.10 compatible versions
     # This explicitly overrides any unpinned packages pulled in by ColabDesign.
