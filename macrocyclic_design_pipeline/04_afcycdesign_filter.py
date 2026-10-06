@@ -106,7 +106,12 @@ def predict_one(pdb_path, pred_dir, binder_chain, target_chain, max_binder_len):
     # Confidence is aux["plddt"] (per residue, target first then binder).
     # aux["losses"]["plddt"] is a LOSS (1 - mean pLDDT), so it is not used here.
     try:
-        per_res = np.asarray(model.aux["plddt"], dtype=float).reshape(-1)
+        # ColabDesign stores raw model outputs inside model.aux["all"]["plddt"]
+        if "plddt" in model.aux:
+            per_res = np.asarray(model.aux["plddt"], dtype=float).reshape(-1)
+        else:
+            per_res = np.asarray(model.aux["all"]["plddt"], dtype=float).reshape(-1)
+            
         plddt = float(per_res[-blen:].mean())
         if plddt > 1.0:
             plddt /= 100.0
