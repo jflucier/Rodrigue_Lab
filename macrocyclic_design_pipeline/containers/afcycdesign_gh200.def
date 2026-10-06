@@ -67,6 +67,8 @@ From: nvcr.io/nvidia/cuda:12.2.2-runtime-ubuntu22.04
     fi
 
     tar -xf "${PARAMS_TAR}"
+    ln -s params_model_1_multimer_v3.npz model_1_multimer_v3.npz
+    ln -s params_model_1_ptm.npz model_1_ptm.npz
     rm -f "${PARAMS_TAR}"
 
     N_NPZ=$(ls -1 *.npz 2>/dev/null | wc -l)
