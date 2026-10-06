@@ -75,19 +75,16 @@ def add_cyclic_offset(self, offset_type=2):
 
 def predict_one(pdb_path, pred_dir, binder_chain, target_chain, max_binder_len):
     """Forward co-complex prediction. Returns (rmsd, ipae, plddt)."""
-    print("in predict_one")
     clear_mem()
-    model = mk_afdesign_model("binder", use_multimer=True, data_dir="/opt/ColabDesign")
+    model = mk_afdesign_model("binder", use_multimer=True)
     model.prep_inputs(
         str(pdb_path),
         binder_chain=binder_chain,
         target_chain=target_chain,
         use_binder_template=False,
         use_multimer=True,
-        use_initial_guess=True,
-        data_dir="/opt/ColabDesign"
+        use_initial_guess=True
     )
-    print("after prep_inputs")
     # Guard against swapped chains: the macrocycle must be the short chain.
     blen, tlen = int(model._binder_len), int(model._target_len)
     if blen > max_binder_len or blen >= tlen:
@@ -95,26 +92,25 @@ def predict_one(pdb_path, pred_dir, binder_chain, target_chain, max_binder_len):
             f"chain assignment looks wrong: binder chain {binder_chain} has {blen} "
             f"residues, target chain {target_chain} has {tlen} "
             f"(max-binder-len={max_binder_len})")
-    print("after chain validation")
     add_cyclic_offset(model, offset_type=2)
     model.set_seq(mode="wildtype")
     model.set_opt(num_recycles=1)
-    print("bef predict")
-    import os
-    base_dir = getattr(model, 'data_dir', 'Not Found')
-    allowed_names = getattr(model, '_model_names', 'Not Found')
-    print(f"DEBUG: model.data_dir is currently -> {base_dir}", flush=True)
-    print(f"DEBUG: model._model_names allowed list -> {allowed_names}", flush=True)
-
-    # Check if the expected params directory physically exists from this path
-    if base_dir != 'Not Found':
-        expected_params_path = os.path.join(base_dir, "params")
-        print(f"DEBUG: Checking filesystem at -> {expected_params_path}", flush=True)
-        if os.path.exists(expected_params_path):
-            print(f"DEBUG: Files physically present: {os.listdir(expected_params_path)}", flush=True)
-        else:
-            print("DEBUG: WARNING! The expected 'params' directory does not exist at this location.", flush=True)
-    # ===================================================
+    # print("bef predict")
+    # import os
+    # base_dir = getattr(model, 'data_dir', 'Not Found')
+    # allowed_names = getattr(model, '_model_names', 'Not Found')
+    # print(f"DEBUG: model.data_dir is currently -> {base_dir}", flush=True)
+    # print(f"DEBUG: model._model_names allowed list -> {allowed_names}", flush=True)
+    #
+    # # Check if the expected params directory physically exists from this path
+    # if base_dir != 'Not Found':
+    #     expected_params_path = os.path.join(base_dir, "params")
+    #     print(f"DEBUG: Checking filesystem at -> {expected_params_path}", flush=True)
+    #     if os.path.exists(expected_params_path):
+    #         print(f"DEBUG: Files physically present: {os.listdir(expected_params_path)}", flush=True)
+    #     else:
+    #         print("DEBUG: WARNING! The expected 'params' directory does not exist at this location.", flush=True)
+    # # ===================================================
 
     model.predict(
         models=["model_1_multimer_v3", "model_2_multimer_v3"],
