@@ -12,6 +12,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+
+
 # --- SLURM WORKER ARRAY STRING TEMPLATE ---
 AFCYC_TEMPLATE = r"""#!/bin/bash
 #SBATCH --job-name=mcy_afcyc
@@ -77,7 +80,7 @@ if [ -s "${JOBS_TSV}" ]; then
     echo "[*] Task assigned ${JOBS_TSV} contains valid design targets. Launching Grace Hopper container..."
 
     singularity exec --nv -B __BIND_PATH__ "${CONTAINER_SIF}" \
-        python3 "__OUT__/04_afcycdesign_filter.py" \
+        python3 "__SCRIPT_DIR__/04_afcycdesign_filter.py" \
         --jobs-tsv "${JOBS_TSV}" \
         --out-csv "${TASK_CSV}" \
         --norm-ipae-cutoff __IPAE_CUTOFF__ \
@@ -201,8 +204,7 @@ def main():
         "N_TASKS": n_tasks,
         "MAX_CONC": args.max_concurrent,
         "N_ROUNDS": args.n_rounds,
-
-        # Injected Custom Threshold Rules
+        "SCRIPT_DIR": SCRIPT_DIR,
         "IPAE_CUTOFF": args.norm_ipae_cutoff,
         "RMSD_CUTOFF": args.rmsd_cutoff,
         "PLDDT_CUTOFF": args.plddt_cutoff,
