@@ -85,7 +85,7 @@ def predict_one(pdb_path, pred_dir, binder_chain, target_chain, max_binder_len):
         use_binder_template=False,
         use_multimer=True,
         use_initial_guess=True,
-        data_dir="/opt/ColabDesign"
+        data_dir="/opt/ColabDesign/params"
     )
     print("after prep_inputs")
     # Guard against swapped chains: the macrocycle must be the short chain.
