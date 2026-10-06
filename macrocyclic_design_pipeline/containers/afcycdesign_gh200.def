@@ -79,8 +79,9 @@ From: nvcr.io/nvidia/cuda:12.2.2-runtime-ubuntu22.04
     export PYTHONPATH=/opt/ColabDesign:$PYTHONPATH
     export ALPHAFOLD_PARAMS_PATH=/opt/ColabDesign/params
 
-    export XLA_PYTHON_CLIENT_PREALLOCATE=true
-    export XLA_PYTHON_CLIENT_MEM_FRACTION=0.85
+    export XLA_PYTHON_CLIENT_PREALLOCATE=false
+#    export XLA_PYTHON_CLIENT_MEM_FRACTION=0.85
+    export XLA_PYTHON_CLIENT_ALLOCATOR=platform
 
 %runscript
     exec python3 "$@"
