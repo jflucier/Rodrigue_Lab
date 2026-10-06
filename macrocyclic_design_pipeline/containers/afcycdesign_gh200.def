@@ -42,6 +42,7 @@ From: nvcr.io/nvidia/cuda:12.2.2-runtime-ubuntu22.04
         "jax-cuda12-pjrt==0.4.30" \
         "optax==0.2.3" \
         "dm-haiku==0.0.12" \
+        "nvidia-cudnn-cu12" \
         "nvidia-nccl-cu12"
 
 
@@ -79,8 +80,16 @@ From: nvcr.io/nvidia/cuda:12.2.2-runtime-ubuntu22.04
     export PYTHONPATH=/opt/ColabDesign:$PYTHONPATH
     export ALPHAFOLD_PARAMS_PATH=/opt/ColabDesign/params
 
+    # Dynamically resolve python's nvidia runtime variables (safe on all cluster shells)
+    export CUDNN_PATH=$(dirname $(python3 -c "import nvidia.cudnn; print(nvidia.cudnn.__file__)" 2>/dev/null || echo ""))
+    export NCCL_PATH=$(dirname $(python3 -c "import nvidia.nccl; print(nvidia.nccl.__file__)" 2>/dev/null || echo ""))
+
+    if [ -n "$CUDNN_PATH" ]; then
+        export LD_LIBRARY_PATH="${CUDNN_PATH}/lib:${NCCL_PATH}/lib:${LD_LIBRARY_PATH}"
+    fi
+
+    # Core execution tuning for GH200 nodes
     export XLA_PYTHON_CLIENT_PREALLOCATE=false
-#    export XLA_PYTHON_CLIENT_MEM_FRACTION=0.85
     export XLA_PYTHON_CLIENT_ALLOCATOR=platform
 
 %runscript
