@@ -93,37 +93,37 @@ def predict_one(pdb_path, pred_dir, binder_chain, target_chain, max_binder_len):
             f"chain assignment looks wrong: binder chain {binder_chain} has {blen} "
             f"residues, target chain {target_chain} has {tlen} "
             f"(max-binder-len={max_binder_len})")
-    print("after chain validation")
+    # print("after chain validation")
     add_cyclic_offset(model, offset_type=2)
     model.set_seq(mode="wildtype")
     model.set_opt(num_recycles=1)
-    print("bef predict")
-    import os
-    base_dir = getattr(model, 'data_dir', 'Not Found')
-    allowed_names = getattr(model, '_model_names', 'Not Found')
-    print(f"DEBUG: model.data_dir is currently -> {base_dir}", flush=True)
-    print(f"DEBUG: model._model_names allowed list -> {allowed_names}", flush=True)
-
-    # Check if the expected params directory physically exists from this path
-    if base_dir != 'Not Found':
-        expected_params_path = os.path.join(base_dir, "params")
-        print(f"DEBUG: Checking filesystem at -> {expected_params_path}", flush=True)
-        if os.path.exists(expected_params_path):
-            print(f"DEBUG: Files physically present: {os.listdir(expected_params_path)}", flush=True)
-        else:
-            print("DEBUG: WARNING! The expected 'params' directory does not exist at this location.", flush=True)
-    # ===================================================
+    # print("bef predict")
+    # import os
+    # base_dir = getattr(model, 'data_dir', 'Not Found')
+    # allowed_names = getattr(model, '_model_names', 'Not Found')
+    # print(f"DEBUG: model.data_dir is currently -> {base_dir}", flush=True)
+    # print(f"DEBUG: model._model_names allowed list -> {allowed_names}", flush=True)
+    #
+    # # Check if the expected params directory physically exists from this path
+    # if base_dir != 'Not Found':
+    #     expected_params_path = os.path.join(base_dir, "params")
+    #     print(f"DEBUG: Checking filesystem at -> {expected_params_path}", flush=True)
+    #     if os.path.exists(expected_params_path):
+    #         print(f"DEBUG: Files physically present: {os.listdir(expected_params_path)}", flush=True)
+    #     else:
+    #         print("DEBUG: WARNING! The expected 'params' directory does not exist at this location.", flush=True)
+    # # ===================================================
 
     model.predict(
         models=["model_1_multimer_v3", "model_2_multimer_v3"],
         verbose=True
     )
-    print("after predict")
+    # print("after predict")
     model.save_pdb(str(pred_dir / f"{pdb_path.stem}_prediction.pdb"))
-    print("after save_pdb")
+    # print("after save_pdb")
     rmsd = float(model.aux["losses"]["rmsd"])
     ipae = float(model.aux["all"]["losses"]["i_pae"][0])
-    print("fetch stats")
+    # print("fetch stats")
     # Confidence is aux["plddt"] (per residue, target first then binder).
     # aux["losses"]["plddt"] is a LOSS (1 - mean pLDDT), so it is not used here.
     try:
