@@ -2,30 +2,46 @@
 """
 04_afcycdesign_filter.py
 
-Predicts target-macrocycle complex binding modes using AfCycDesign forward passes.
-Strictly filters on: Normalized iPAE < 0.30, Ca RMSD < 1.5 A, and pLDDT > 0.80.
+Predicts target-macrocycle complex binding modes with AfCycDesign (one SLURM
+array task = one chunk of designs) and logs per-design metrics to a
+task-private CSV:  <out-dir>/logs/afcyc_r<round>_task<task-id>.csv
 
-Features a robust, non-destructive resume checkpoint engine that parses the
-summary CSV on startup to bypass completed trajectories.
+Design notes
+- Every row is appended and flushed as soon as its prediction finishes, so a
+  timeout/OOM loses at most the design in flight.
+- Failed predictions are logged with passed=ERROR (and the message) so they are
+  not silently retried forever. To retry them, delete those rows from the CSV.
+- Resume: designs already present in this task's CSV are skipped.
+- `passed` = norm_iPAE < cutoff AND Ca RMSD < cutoff AND pLDDT > cutoff.
+  The SI filters on iPAE and RMSD only; pLDDT is always recorded, but the gate
+  is disabled by default (--plddt-cutoff 0.0).
+- Normalized iPAE = iPAE / 32 (SI section 2.3). iPAE is from model [0] while
+  RMSD is the ensemble-averaged loss, matching the SI example script.
 """
 import argparse
 import csv
 import sys
-import os
 import warnings
 from pathlib import Path
 
-warnings.simplefilter(action='ignore', category=FutureWarning)
+warnings.simplefilter(action="ignore", category=FutureWarning)
 
 try:
     import numpy as np
+except ImportError:
+    np = None
+
+try:
     from colabdesign import mk_afdesign_model, clear_mem
 except ImportError:
     mk_afdesign_model = None
+    clear_mem = None
+
+CSV_HEADERS = ["design", "rmsd", "ipae", "normalized_ipae", "plddt", "passed", "error"]
 
 
 def add_cyclic_offset(self, offset_type=2):
-    """Verbatim cyclic offset patch from the sokrypton/ColabDesign notebook."""
+    """Cyclic offset patch from the sokrypton/ColabDesign notebook."""
 
     def cyclic_offset(L):
         i = np.arange(L)
@@ -57,144 +73,140 @@ def add_cyclic_offset(self, offset_type=2):
     self._inputs["offset"] = offset
 
 
-def predict_one(pdb_path: Path, out_dir: Path, score_sc_path: Path):
-    """Runs a forward co-complex structure prediction matching the paper logic."""
+def predict_one(pdb_path, pred_dir, binder_chain, target_chain, max_binder_len):
+    """Forward co-complex prediction. Returns (rmsd, ipae, plddt)."""
     clear_mem()
-
     model = mk_afdesign_model("binder")
     model.prep_inputs(
         str(pdb_path),
-        binder_chain="A",  # Macrocycle (Your pipeline convention)
-        target_chain="B",  # Target protein (Your pipeline convention)
+        binder_chain=binder_chain,
+        target_chain=target_chain,
         use_binder_template=False,
         use_multimer=True,
         use_initial_guess=True,
     )
 
-    # Apply the cyclic peptide bond offset constraints
-    add_cyclic_offset(model, offset_type=2)
+    # Guard against swapped chains: the macrocycle must be the short chain.
+    blen, tlen = int(model._binder_len), int(model._target_len)
+    if blen > max_binder_len or blen >= tlen:
+        raise ValueError(
+            f"chain assignment looks wrong: binder chain {binder_chain} has {blen} "
+            f"residues, target chain {target_chain} has {tlen} "
+            f"(max-binder-len={max_binder_len})")
 
+    add_cyclic_offset(model, offset_type=2)
     model.set_seq(mode="wildtype")
     model.set_opt(num_recycles=1)
-
-    # Run structure prediction forward pass across models 0 and 1
     model.predict(models=[0, 1], verbose=False)
+    model.save_pdb(str(pred_dir / f"{pdb_path.stem}_prediction.pdb"))
 
-    # Save the predicted binding mode coordinates
-    out_pdb = out_dir / f"{pdb_path.stem}_prediction.pdb"
-    model.save_pdb(str(out_pdb))
-
-    # Extract exact metrics matching paper snippet
     rmsd = float(model.aux["losses"]["rmsd"])
     ipae = float(model.aux["all"]["losses"]["i_pae"][0])
 
-    # Normalize pLDDT tracking onto a standard 0.0 - 1.0 scale
-    raw_plddt = float(model.aux["losses"]["plddt"])
-    plddt = raw_plddt / 100.0 if raw_plddt > 1.0 else raw_plddt
-
-    # Append directly to legacy score.sc file
-    with open(score_sc_path, "a") as outfile:
-        outfile.write(f"{pdb_path.stem},{ipae:.4f},{rmsd:.4f},{plddt:.4f}\n")
-
+    # Confidence is aux["plddt"] (per residue, target first then binder).
+    # aux["losses"]["plddt"] is a LOSS (1 - mean pLDDT), so it is not used here.
+    try:
+        per_res = np.asarray(model.aux["plddt"], dtype=float).reshape(-1)
+        plddt = float(per_res[-blen:].mean())
+        if plddt > 1.0:
+            plddt /= 100.0
+    except Exception:
+        plddt = float("nan")
     return rmsd, ipae, plddt
 
 
+def read_done(csv_path):
+    done = set()
+    if csv_path.exists() and csv_path.stat().st_size > 0:
+        with open(csv_path, newline="") as fh:
+            for row in csv.DictReader(fh):
+                if row.get("design"):
+                    done.add(row["design"])
+    return done
+
+
+def append_row(csv_path, row):
+    new_file = not csv_path.exists() or csv_path.stat().st_size == 0
+    with open(csv_path, "a", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=CSV_HEADERS)
+        if new_file:
+            w.writeheader()
+        w.writerow(row)
+        fh.flush()
+
+
 def main():
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--jobs-tsv", required=True,
-                    help="Path to the TSV file defining this parallel worker chunk segment")
-    ap.add_argument("--out-csv", required=True, help="Global path to the centralized summary output CSV")
+                    help="TSV for this chunk; the LAST column is the relaxed complex PDB")
+    ap.add_argument("--out-dir", required=True)
+    ap.add_argument("--round", type=int, required=True)
+    ap.add_argument("--task-id", type=int, required=True)
     ap.add_argument("--norm-ipae-cutoff", type=float, default=0.30)
     ap.add_argument("--rmsd-cutoff", type=float, default=1.5)
-    ap.add_argument("--plddt-cutoff", type=float, default=0.80)
+    ap.add_argument("--plddt-cutoff", type=float, default=0.0,
+                    help="0 disables the pLDDT gate (pLDDT is still recorded)")
     ap.add_argument("--ipae-norm", type=float, default=32.0)
+    ap.add_argument("--binder-chain", default="A")
+    ap.add_argument("--target-chain", default="B")
+    ap.add_argument("--max-binder-len", type=int, default=30)
     args = ap.parse_args()
 
-    # 1. Parse the TSV chunk file allocated to this specific node process
     jobs = []
-    with open(args.jobs_tsv, "r") as f:
-        for line in f:
+    with open(args.jobs_tsv) as fh:
+        for line in fh:
             if line.strip():
-                jobs.append(line.strip().split("\t"))
-
+                jobs.append(Path(line.rstrip("\n").split("\t")[-1]))
     if not jobs:
-        sys.exit("Nothing to process inside the allocated jobs-tsv chunk segment.")
+        print("Nothing to process in this chunk.")
+        return
 
-    if mk_afdesign_model is None:
-        sys.exit("ColabDesign is not importable inside the current context.")
+    log_dir = Path(args.out_dir) / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    csv_path = log_dir / f"afcyc_r{args.round}_task{args.task_id}.csv"
 
-    out_csv_path = Path(args.out_csv)
+    done = read_done(csv_path)
+    todo = [p for p in jobs if p.stem not in done]
+    print(f"[*] {len(jobs)} designs in chunk, {len(done)} already logged, {len(todo)} to run")
 
-    # 2. Non-Destructive Resume Check: Build index of previously completed design keys
-    completed_designs = set()
-    historical_rows = []
-    if out_csv_path.exists() and out_csv_path.stat().st_size > 0:
-        try:
-            with open(out_csv_path, "r", newline="") as fh:
-                reader = csv.DictReader(fh)
-                for row in reader:
-                    completed_designs.add(row["design"])
-                    historical_rows.append(row)
-            print(
-                f"[*] Discovered existing summary database on disk. Cache contains {len(completed_designs)} completed records.")
-        except Exception as e:
-            print(f"[WARN] Error reading existing CSV database; processing chunk with a blank slate. Error: {e}")
+    if todo:
+        if np is None or mk_afdesign_model is None:
+            sys.exit("numpy and/or ColabDesign are not importable in this environment.")
 
-    # Process tasks assigned to this active thread node
-    new_rows = []
-    for k, (in_pdb_str, fasta_str, relaxed_str) in enumerate(jobs, 1):
-        pdb_path = Path(relaxed_str)
+        for k, pdb_path in enumerate(todo, 1):
+            print(f"[{k}/{len(todo)}] {pdb_path.name}", flush=True)
+            pred_dir = pdb_path.parent / "afcyc_predictions"
+            pred_dir.mkdir(exist_ok=True)
+            row = {h: "" for h in CSV_HEADERS}
+            row["design"] = pdb_path.stem
+            try:
+                rmsd, ipae, plddt = predict_one(
+                    pdb_path, pred_dir, args.binder_chain, args.target_chain,
+                    args.max_binder_len)
+                norm_ipae = ipae / args.ipae_norm
+                plddt_ok = (plddt > args.plddt_cutoff) if args.plddt_cutoff > 0 else True
+                passed = (norm_ipae < args.norm_ipae_cutoff) and (rmsd < args.rmsd_cutoff) and plddt_ok
+                print(f"  iPAE {ipae:.2f} (norm {norm_ipae:.3f}) RMSD {rmsd:.2f} A "
+                      f"pLDDT {plddt:.2f} passed={passed}", flush=True)
+                row.update(rmsd=f"{rmsd:.4f}", ipae=f"{ipae:.4f}",
+                           normalized_ipae=f"{norm_ipae:.4f}", plddt=f"{plddt:.4f}",
+                           passed=str(passed))
+            except Exception as e:
+                msg = " ".join(str(e).split())[:200]
+                print(f"  [WARN] prediction failed: {msg}", flush=True)
+                row.update(passed="ERROR", error=msg)
+            append_row(csv_path, row)
 
-        # Immediate shortcut skip if the design is already logged in the summary table
-        if pdb_path.stem in completed_designs:
-            print(f"[{k}/{len(jobs)}] [SKIP] {pdb_path.stem} already logged in CSV database.")
-            continue
-
-        print(f"[{k}/{len(jobs)}] Predicting co-complex binding mode: {pdb_path.name}", flush=True)
-        pred_dir = pdb_path.parent / "afcyc_predictions"
-        pred_dir.mkdir(exist_ok=True)
-        score_sc_path = pdb_path.parent / "score.sc"
-
-        try:
-            rmsd, ipae, plddt = predict_one(pdb_path, pred_dir, score_sc_path)
-            norm_ipae = ipae / args.ipae_norm
-
-            passed = (norm_ipae < args.norm_ipae_cutoff) and (rmsd < args.rmsd_cutoff) and (plddt > args.plddt_cutoff)
-            print(
-                f"  --> iPAE: {ipae:.2f} (Norm: {norm_ipae:.2f}), RMSD: {rmsd:.2f}A, pLDDT: {plddt:.2f} [Passed={passed}]",
-                flush=True)
-
-            new_rows.append({
-                "design": pdb_path.stem, "rmsd": f"{rmsd:.4f}", "ipae": f"{ipae:.4f}",
-                "normalized_ipae": f"{norm_ipae:.4f}", "plddt": f"{plddt:.4f}", "passed": str(passed)
-            })
-        except Exception as e:
-            print(f"  --> [WARN] Prediction pass failed for {pdb_path.name}: {e}", flush=True)
-            continue
-
-    # 3. Thread-Safe Atomic Append: Append new lines to the centralized global tracker table
-    csv_headers = ["design", "rmsd", "ipae", "normalized_ipae", "plddt", "passed"]
-    write_header = not out_csv_path.exists() or out_csv_path.stat().st_size == 0
-
-    with open(out_csv_path, "a", newline="") as fh:
-        writer = csv.DictWriter(fh, fieldnames=csv_headers)
-        if write_header:
-            writer.writeheader()
-        writer.writerows(new_rows)
-
-    # 4. Display Aggregate Performance Metrics (Historic + New rows combined)
-    all_processed_rows = historical_rows + new_rows
-    total_processed = len(all_processed_rows) if all_processed_rows else 1
-    n_passed = sum(1 for r in all_processed_rows if r["passed"].lower() == "true")
-    pass_rate = (n_passed / total_processed) * 100
-
-    print("\n" + "=" * 60)
-    print("📈 AGGREGATE POOL SCREENING MATRIX CONVERGENCE")
+    # Summary for this task's CSV
+    with open(csv_path, newline="") as fh:
+        rows = list(csv.DictReader(fh))
+    n_ok = [r for r in rows if r["passed"] in ("True", "False")]
+    n_pass = sum(r["passed"] == "True" for r in n_ok)
+    n_err = sum(r["passed"] == "ERROR" for r in rows)
     print("=" * 60)
-    print(f"Total Cumulative Database Designs : {total_processed}")
-    print(f"Total Combined Verified Binders   : {n_passed}")
-    print(f"Calculated Pass Rate Percentage   : {pass_rate:.2f}%")
-    print(f"Expected Target Corridor Corridor : 10.00% - 20.00% (MDM2 Baseline Benchmarks)")
+    print(f"Task {args.task_id} round {args.round}: {len(rows)} rows, "
+          f"{n_pass} passed / {len(n_ok)} predicted, {n_err} errors")
     print("=" * 60)
 
 
