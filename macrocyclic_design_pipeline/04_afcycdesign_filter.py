@@ -75,6 +75,7 @@ def add_cyclic_offset(self, offset_type=2):
 
 def predict_one(pdb_path, pred_dir, binder_chain, target_chain, max_binder_len):
     """Forward co-complex prediction. Returns (rmsd, ipae, plddt)."""
+    print("in predict_one")
     clear_mem()
     model = mk_afdesign_model("binder")
     model.prep_inputs(
@@ -85,7 +86,7 @@ def predict_one(pdb_path, pred_dir, binder_chain, target_chain, max_binder_len):
         use_multimer=True,
         use_initial_guess=True,
     )
-
+    print("after prep_inputs")
     # Guard against swapped chains: the macrocycle must be the short chain.
     blen, tlen = int(model._binder_len), int(model._target_len)
     if blen > max_binder_len or blen >= tlen:
@@ -93,25 +94,22 @@ def predict_one(pdb_path, pred_dir, binder_chain, target_chain, max_binder_len):
             f"chain assignment looks wrong: binder chain {binder_chain} has {blen} "
             f"residues, target chain {target_chain} has {tlen} "
             f"(max-binder-len={max_binder_len})")
-
+    print("after chain validation")
     add_cyclic_offset(model, offset_type=2)
     model.set_seq(mode="wildtype")
     model.set_opt(num_recycles=1)
+    print("bef predict")
     model.predict(models=[0, 1], verbose=False)
+    print("after predict")
     model.save_pdb(str(pred_dir / f"{pdb_path.stem}_prediction.pdb"))
-
+    print("after save_pdb")
     rmsd = float(model.aux["losses"]["rmsd"])
     ipae = float(model.aux["all"]["losses"]["i_pae"][0])
-
+    print("fetch stats")
     # Confidence is aux["plddt"] (per residue, target first then binder).
     # aux["losses"]["plddt"] is a LOSS (1 - mean pLDDT), so it is not used here.
     try:
-        # ColabDesign stores raw model outputs inside model.aux["all"]["plddt"]
-        if "plddt" in model.aux:
-            per_res = np.asarray(model.aux["plddt"], dtype=float).reshape(-1)
-        else:
-            per_res = np.asarray(model.aux["all"]["plddt"], dtype=float).reshape(-1)
-            
+        per_res = np.asarray(model.aux["plddt"], dtype=float).reshape(-1)
         plddt = float(per_res[-blen:].mean())
         if plddt > 1.0:
             plddt /= 100.0
