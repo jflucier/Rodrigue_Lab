@@ -38,7 +38,10 @@ From: nvcr.io/nvidia/cuda:12.2.2-runtime-ubuntu22.04
     pip3 install --no-cache-dir --force-reinstall \
         "jax==0.4.30" \
         "jaxlib==0.4.30" \
-        "jax-cuda12-plugin" \
+        "jax-cuda12-plugin==0.4.30" \
+        "jax-cuda12-pjrt==0.4.30" \
+        "optax==0.2.3" \
+        "dm-haiku==0.0.12" \
         "nvidia-nccl-cu12"
 
 
