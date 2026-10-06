@@ -33,8 +33,6 @@ def main():
     ap.add_argument("csv", help="Merged summary CSV from 04b_merge_afcyc_csvs.py")
     ap.add_argument("--max-rmsd", type=float, default=1.5,
                     help="Ca RMSD cutoff in A (SI uses 1.5 for RbtA; keep equal to the filter script)")
-    ap.add_argument("--ipae-norm", type=float, default=32.0,
-                    help="Divisor used if only raw 'ipae' is present")
     ap.add_argument("--budget", type=int, default=200,
                     help="Number of designs you can afford to take to the Rosetta stage")
     args = ap.parse_args()
@@ -47,27 +45,25 @@ def main():
 
     if "passed" in df.columns:
         df = df[df["passed"].astype(str).str.upper() != "ERROR"]
-    if "normalized_ipae" not in df.columns and "ipae" in df.columns:
-        df["normalized_ipae"] = pd.to_numeric(df["ipae"], errors="coerce") / args.ipae_norm
-    missing = {"rmsd", "normalized_ipae"} - set(df.columns)
+    missing = {"rmsd", "ipae"} - set(df.columns)
     if missing:
         sys.exit(f"Missing columns: {sorted(missing)} (have {list(df.columns)})")
 
-    for c in ("rmsd", "normalized_ipae"):
+    for c in ("rmsd", "ipae"):
         df[c] = pd.to_numeric(df[c], errors="coerce")
-    df = df.dropna(subset=["rmsd", "normalized_ipae"])
+    df = df.dropna(subset=["rmsd", "ipae"])
     n_pred = len(df)
     pool = df[df["rmsd"] < args.max_rmsd]
     if pool.empty:
         sys.exit(f"No designs with RMSD < {args.max_rmsd} A out of {n_pred} predicted.")
-    x = pool["normalized_ipae"].to_numpy()
+    x = pool["ipae"].to_numpy()
 
     print(f"Rows in CSV: {n_total} | predicted OK: {n_pred} | RMSD < {args.max_rmsd} A: {len(pool)} "
           f"({100 * len(pool) / n_pred:.1f}%)")
-    print("\nNormalized iPAE of the RMSD-passing pool (raw = x{:.0f}):".format(args.ipae_norm))
+    print("\niPAE (0-1 scale) of the RMSD-passing pool:")
     for label, q in [("min", 0), ("p1", 1), ("p5", 5), ("p10", 10), ("p25", 25), ("median", 50)]:
         v = np.percentile(x, q)
-        print(f"  {label:>6}: {v:.3f}  (raw {v * args.ipae_norm:.1f})")
+        print(f"  {label:>6}: {v:.3f}")
 
     print("\nDesigns passing at candidate cutoffs (paper values):")
     print(f"  {'cutoff':>8} {'n pass':>8} {'% of RMSD-pool':>15} {'% of all predicted':>20}")

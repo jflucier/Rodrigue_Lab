@@ -12,11 +12,13 @@ Design notes
 - Failed predictions are logged with passed=ERROR (and the message) so they are
   not silently retried forever. To retry them, delete those rows from the CSV.
 - Resume: designs already present in this task's CSV are skipped.
-- `passed` = norm_iPAE < cutoff AND Ca RMSD < cutoff AND pLDDT > cutoff.
+- `passed` = iPAE < cutoff AND Ca RMSD < cutoff AND pLDDT > cutoff.
   The SI filters on iPAE and RMSD only; pLDDT is always recorded, but the gate
   is disabled by default (--plddt-cutoff 0.0).
-- Normalized iPAE = iPAE / 32 (SI section 2.3). iPAE is from model [0] while
-  RMSD is the ensemble-averaged loss, matching the SI example script.
+- iPAE is ColabDesign's i_pae, already on a 0-1 scale (the SI's "normalized
+  iPAE"), so no extra division is applied. The gate uses the MEAN over the models
+  run, like the ensemble-averaged RMSD. The SI example used model [0] only; that
+  value is logged as ipae_m0 (and the worst model as ipae_max) for comparison.
 """
 import argparse
 import csv
@@ -37,7 +39,7 @@ except ImportError:
     mk_afdesign_model = None
     clear_mem = None
 
-CSV_HEADERS = ["design", "rmsd", "ipae", "normalized_ipae", "plddt", "passed", "error"]
+CSV_HEADERS = ["design", "rmsd", "ipae", "ipae_m0", "ipae_max", "plddt", "passed", "error"]
 
 
 def add_cyclic_offset(self, offset_type=2):
@@ -74,7 +76,7 @@ def add_cyclic_offset(self, offset_type=2):
 
 
 def predict_one(pdb_path, pred_dir, binder_chain, target_chain, max_binder_len):
-    """Forward co-complex prediction. Returns (rmsd, ipae, plddt)."""
+    """Forward co-complex prediction. Returns (rmsd, ipae_mean, ipae_m0, ipae_max, plddt)."""
     clear_mem()
     model = mk_afdesign_model("binder", use_multimer=True, data_dir="/opt/ColabDesign")
     model.prep_inputs(
@@ -97,23 +99,6 @@ def predict_one(pdb_path, pred_dir, binder_chain, target_chain, max_binder_len):
     add_cyclic_offset(model, offset_type=2)
     model.set_seq(mode="wildtype")
     model.set_opt(num_recycles=1)
-    # print("bef predict")
-    # import os
-    # base_dir = getattr(model, 'data_dir', 'Not Found')
-    # allowed_names = getattr(model, '_model_names', 'Not Found')
-    # print(f"DEBUG: model.data_dir is currently -> {base_dir}", flush=True)
-    # print(f"DEBUG: model._model_names allowed list -> {allowed_names}", flush=True)
-    #
-    # # Check if the expected params directory physically exists from this path
-    # if base_dir != 'Not Found':
-    #     expected_params_path = os.path.join(base_dir, "params")
-    #     print(f"DEBUG: Checking filesystem at -> {expected_params_path}", flush=True)
-    #     if os.path.exists(expected_params_path):
-    #         print(f"DEBUG: Files physically present: {os.listdir(expected_params_path)}", flush=True)
-    #     else:
-    #         print("DEBUG: WARNING! The expected 'params' directory does not exist at this location.", flush=True)
-    # # ===================================================
-
     model.predict(
         models=["model_1_multimer_v3", "model_2_multimer_v3"],
         verbose=True
@@ -122,7 +107,10 @@ def predict_one(pdb_path, pred_dir, binder_chain, target_chain, max_binder_len):
     model.save_pdb(str(pred_dir / f"{pdb_path.stem}_prediction.pdb"))
     # print("after save_pdb")
     rmsd = float(model.aux["losses"]["rmsd"])
-    ipae = float(model.aux["all"]["losses"]["i_pae"][0])
+    # i_pae per model; the gate uses the mean over the models run (consistent with
+    # the ensemble-averaged RMSD). Model 0 alone is what the SI example script used.
+    ipae_all = np.asarray(model.aux["all"]["losses"]["i_pae"], dtype=float).reshape(-1)
+    ipae, ipae_m0, ipae_max = float(ipae_all.mean()), float(ipae_all[0]), float(ipae_all.max())
     # print("fetch stats")
     # Confidence is aux["plddt"] (per residue, target first then binder).
     # aux["losses"]["plddt"] is a LOSS (1 - mean pLDDT), so it is not used here.
@@ -133,7 +121,7 @@ def predict_one(pdb_path, pred_dir, binder_chain, target_chain, max_binder_len):
             plddt /= 100.0
     except Exception:
         plddt = float("nan")
-    return rmsd, ipae, plddt
+    return rmsd, ipae, ipae_m0, ipae_max, plddt
 
 
 def read_done(csv_path):
@@ -164,11 +152,11 @@ def main():
     ap.add_argument("--out-dir", required=True)
     ap.add_argument("--round", type=int, required=True)
     ap.add_argument("--task-id", type=int, required=True)
-    ap.add_argument("--norm-ipae-cutoff", type=float, default=0.30)
+    ap.add_argument("--ipae-cutoff", "--norm-ipae-cutoff", dest="ipae_cutoff", type=float, default=0.30,
+                    help="ColabDesign i_pae is already on a 0-1 scale (no further normalization)")
     ap.add_argument("--rmsd-cutoff", type=float, default=1.5)
     ap.add_argument("--plddt-cutoff", type=float, default=0.0,
                     help="0 disables the pLDDT gate (pLDDT is still recorded)")
-    ap.add_argument("--ipae-norm", type=float, default=32.0)
     ap.add_argument("--binder-chain", default="A")
     ap.add_argument("--target-chain", default="B")
     ap.add_argument("--max-binder-len", type=int, default=30)
@@ -202,17 +190,15 @@ def main():
             row = {h: "" for h in CSV_HEADERS}
             row["design"] = pdb_path.stem
             try:
-                rmsd, ipae, plddt = predict_one(
+                rmsd, ipae, ipae_m0, ipae_max, plddt = predict_one(
                     pdb_path, pred_dir, args.binder_chain, args.target_chain,
                     args.max_binder_len)
-                norm_ipae = ipae / args.ipae_norm
                 plddt_ok = (plddt > args.plddt_cutoff) if args.plddt_cutoff > 0 else True
-                passed = (norm_ipae < args.norm_ipae_cutoff) and (rmsd < args.rmsd_cutoff) and plddt_ok
-                print(f"  iPAE {ipae:.2f} (norm {norm_ipae:.3f}) RMSD {rmsd:.2f} A "
+                passed = (ipae < args.ipae_cutoff) and (rmsd < args.rmsd_cutoff) and plddt_ok
+                print(f"  iPAE mean {ipae:.3f} (m0 {ipae_m0:.3f}, max {ipae_max:.3f}) RMSD {rmsd:.2f} A "
                       f"pLDDT {plddt:.2f} passed={passed}", flush=True)
-                row.update(rmsd=f"{rmsd:.4f}", ipae=f"{ipae:.4f}",
-                           normalized_ipae=f"{norm_ipae:.4f}", plddt=f"{plddt:.4f}",
-                           passed=str(passed))
+                row.update(rmsd=f"{rmsd:.4f}", ipae=f"{ipae:.4f}", ipae_m0=f"{ipae_m0:.4f}", ipae_max=f"{ipae_max:.4f}",
+                           plddt=f"{plddt:.4f}", passed=str(passed))
             except Exception as e:
                 msg = " ".join(str(e).split())[:200]
                 print(f"  [WARN] prediction failed: {msg}", flush=True)

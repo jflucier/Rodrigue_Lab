@@ -90,7 +90,7 @@ singularity exec --nv -B __BIND_PATH__,__SCRIPT_DIR__ "__CONTAINER_SIF__" \
     --out-dir "${OUT}" \
     --round "${ROUND}" \
     --task-id "${SLURM_ARRAY_TASK_ID}" \
-    --norm-ipae-cutoff __IPAE_CUTOFF__ \
+    --ipae-cutoff __IPAE_CUTOFF__ \
     --rmsd-cutoff __RMSD_CUTOFF__ \
     --plddt-cutoff __PLDDT_CUTOFF__ \
     --binder-chain __BINDER_CHAIN__ \
@@ -152,7 +152,7 @@ def main():
                     help="Concurrent array tasks PER ROUND (all rounds are submitted together)")
     ap.add_argument("--submit", action="store_true")
 
-    ap.add_argument("--norm-ipae-cutoff", type=float, default=0.30)
+    ap.add_argument("--ipae-cutoff", "--norm-ipae-cutoff", dest="ipae_cutoff", type=float, default=0.30)
     ap.add_argument("--rmsd-cutoff", type=float, default=1.5)
     ap.add_argument("--plddt-cutoff", type=float, default=0.0,
                     help="0 disables the pLDDT gate (pLDDT is still recorded)")
@@ -203,7 +203,7 @@ def main():
         "MAX_CONC": args.max_concurrent,
         "N_ROUNDS": args.n_rounds,
         "SCRIPT_DIR": SCRIPT_DIR,
-        "IPAE_CUTOFF": args.norm_ipae_cutoff,
+        "IPAE_CUTOFF": args.ipae_cutoff,
         "RMSD_CUTOFF": args.rmsd_cutoff,
         "PLDDT_CUTOFF": args.plddt_cutoff,
         "BINDER_CHAIN": args.binder_chain,
@@ -226,7 +226,7 @@ def main():
     print(f"Array tasks / round  : {n_tasks} (chunk size {args.chunk_size})")
     print(f"Peak GPUs if all rounds submitted together: {args.n_rounds * args.max_concurrent}")
     print(f"Chains               : binder={args.binder_chain} target={args.target_chain}")
-    print(f"Pass rule            : norm iPAE < {args.norm_ipae_cutoff} | RMSD < {args.rmsd_cutoff} A"
+    print(f"Pass rule            : iPAE < {args.ipae_cutoff} | RMSD < {args.rmsd_cutoff} A"
           + (f" | pLDDT > {args.plddt_cutoff}" if args.plddt_cutoff > 0 else " | pLDDT not gated"))
     print("Each task writes logs/afcyc_r<round>_task<n>.csv; afterwards run, per round:")
     print(f"  python {SCRIPT_DIR}/04b_merge_afcyc_csvs.py {out_path} --round N --expected-tasks {n_tasks}")
