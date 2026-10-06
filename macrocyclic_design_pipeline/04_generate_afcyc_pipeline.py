@@ -226,7 +226,7 @@ def main():
     print(
         f"Screening Metrics Setup Rules  : Norm iPAE < {args.norm_ipae_cutoff} | RMSD < {args.rmsd_cutoff}A | pLDDT > {args.plddt_cutoff}")
     print(f"Each array task writes its OWN csv (afcyc_r<round>_task<n>.csv) -- merge "
-          f"with 04c_merge_afcyc_csvs.py once arrays finish.")
+          f"with 04b_merge_afcyc_csvs.py once arrays finish.")
     print(f"Files written completely to    : {out_path}")
     print(f"\nLaunch ALL rounds simultaneously in parallel:\n  bash {submit_script}")
     print(f"\nLaunch a single isolated round manually (e.g. Round 3):\n  bash {submit_script} 3")
