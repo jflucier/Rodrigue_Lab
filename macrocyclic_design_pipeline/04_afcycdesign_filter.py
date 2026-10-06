@@ -77,7 +77,7 @@ def predict_one(pdb_path, pred_dir, binder_chain, target_chain, max_binder_len):
     """Forward co-complex prediction. Returns (rmsd, ipae, plddt)."""
     print("in predict_one")
     clear_mem()
-    model = mk_afdesign_model("binder")
+    model = mk_afdesign_model("binder", data_dir="/opt/ColabDesign/params")
     model.prep_inputs(
         str(pdb_path),
         binder_chain=binder_chain,
