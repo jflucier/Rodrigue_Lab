@@ -27,30 +27,20 @@ From: nvcr.io/nvidia/cuda:12.2.2-runtime-ubuntu22.04
     # 2. Upgrade pip and optimize core Python environment parameters
     pip3 install --no-cache-dir --upgrade pip setuptools wheel
 
-    # 3. Install JAX with explicit CUDA 12 support for GPU acceleration.
-    # Modern JAX (jaxlib >=0.4.30, since the "plugin-based" CUDA install
-    # became mandatory) manages its own CUDA/cuDNN via pip dependencies
-    # (nvidia-cudnn-cu12 etc.) rather than relying on the base image's
-    # system cuDNN -- which is why this uses a plain `-runtime` base image
-    # with no cudnn package baked in, rather than a `-cudnnN-runtime`
-    # variant: a system-installed cuDNN alongside jax's own pip-installed
-    # one is an unnecessary potential version-conflict source, not a
-    # requirement. For reproducibility across a multi-month campaign, pin a
-    # specific version instead of always tracking latest -- check
-    # https://pypi.org/project/jax/#history for a current release before
-    # picking one (left unpinned here rather than guess a number: this file
-    # was written Oct 2026 and jax ships fast enough that any version typed
-    # in without checking that page first would likely already be stale).
-    pip3 install --no-cache-dir "jax[cuda12]"
-
-    # 4. Clone and install ColabDesign. Pinned to a specific commit, not
-    # `main`, so the environment doesn't silently drift under you between
-    # builds -- check https://github.com/sokrypton/ColabDesign/commits/main
-    # for a current commit and update this if you want a newer one.
+    # 3. Clone and install ColabDesign first
     git clone https://github.com/sokrypton/ColabDesign.git /opt/ColabDesign
     cd /opt/ColabDesign
     git checkout 6d3837d94a63df561e73477dfdd553b0cf894a90
     pip3 install --no-cache-dir .
+
+    # 4. FORCE-PIN JAX & JAXLIB to Python 3.10 compatible versions
+    # This explicitly overrides any unpinned packages pulled in by ColabDesign.
+    pip3 install --no-cache-dir --force-reinstall \
+        "jax==0.4.30" \
+        "jaxlib==0.4.30" \
+        "jax-cuda12-plugin" \
+        "nvidia-nccl-cu12"
+
 
     # 5. Pre-download AlphaFold v2 weights inside the container
     mkdir -p /opt/ColabDesign/params
