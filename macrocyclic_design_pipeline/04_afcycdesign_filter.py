@@ -100,6 +100,22 @@ def predict_one(pdb_path, pred_dir, binder_chain, target_chain, max_binder_len):
     model.set_seq(mode="wildtype")
     model.set_opt(num_recycles=1)
     print("bef predict")
+    import os
+    base_dir = getattr(model, 'data_dir', 'Not Found')
+    allowed_names = getattr(model, '_model_names', 'Not Found')
+    print(f"DEBUG: model.data_dir is currently -> {base_dir}", flush=True)
+    print(f"DEBUG: model._model_names allowed list -> {allowed_names}", flush=True)
+
+    # Check if the expected params directory physically exists from this path
+    if base_dir != 'Not Found':
+        expected_params_path = os.path.join(base_dir, "params")
+        print(f"DEBUG: Checking filesystem at -> {expected_params_path}", flush=True)
+        if os.path.exists(expected_params_path):
+            print(f"DEBUG: Files physically present: {os.listdir(expected_params_path)}", flush=True)
+        else:
+            print("DEBUG: WARNING! The expected 'params' directory does not exist at this location.", flush=True)
+    # ===================================================
+
     model.predict(
         models=["model_1_multimer_v3", "model_2_multimer_v3"],
         verbose=True
