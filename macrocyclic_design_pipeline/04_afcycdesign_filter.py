@@ -101,6 +101,7 @@ def predict_one(pdb_path, pred_dir, binder_chain, target_chain, max_binder_len):
     model.set_opt(num_recycles=1)
     model.predict(
         models=["model_1_multimer_v3", "model_2_multimer_v3"],
+        num_models=2,
         verbose=True
     )
     # print("after predict")
