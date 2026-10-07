@@ -185,7 +185,7 @@ def main():
 
         for k, pdb_path in enumerate(todo, 1):
             print(f"[{k}/{len(todo)}] {pdb_path.name}", flush=True)
-            pred_dir = args.out_dir / "predictions"
+            pred_dir = Path(args.out_dir) / "predictions"
             pred_dir.mkdir(exist_ok=True)
             row = {h: "" for h in CSV_HEADERS}
             row["design"] = pdb_path.stem
