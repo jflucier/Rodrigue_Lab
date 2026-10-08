@@ -288,8 +288,8 @@ def main():
 
     if args.workers < 1:
         sys.exit("--workers must be >= 1")
-    cpus = args.cpus_per_task or max(4, 2 * args.workers)
-    mem = args.mem or f"{max(32, 8 * args.workers)}G"
+    cpus = args.cpus_per_task or max(4, args.workers)
+    mem = args.mem or f"{max(32, 4 * args.workers)}G"
 
     # Process cluster specific modifications
     clusterHeaders = ""
