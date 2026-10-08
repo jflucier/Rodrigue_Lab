@@ -276,7 +276,7 @@ def main():
     ap.add_argument("--workers", type=int, default=1,
                     help="Concurrent RFdiffusion processes sharing the one GPU inside each array task "
                          "(each design uses only ~2 GB of GPU memory). Default 1 = previous behavior.")
-    ap.add_argument("--time", default="06:00:00", help="Slurm time limit per array task")
+    ap.add_argument("--time", default="01:00:00", help="Slurm time limit per array task")
     ap.add_argument("--cpus-per-task", type=int, default=None,
                     help="Default: max(4, 2 x workers)")
     ap.add_argument("--mem", default=None, help="Default: max(32, 8 x workers) GB")
