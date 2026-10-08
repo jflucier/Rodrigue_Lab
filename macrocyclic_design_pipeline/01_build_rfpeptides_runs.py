@@ -39,12 +39,12 @@ except ImportError:
 SLURM_TEMPLATE = """#!/bin/bash
 #SBATCH --job-name=RFdiff_{design_name}
 #SBATCH --account={account}
-#SBATCH --time=06:00:00
+#SBATCH --time={time}
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:1
-#SBATCH --cpus-per-task=4
-#SBATCH --mem=32G
+#SBATCH --cpus-per-task={cpus}
+#SBATCH --mem={mem}
 #SBATCH --array={array_range_str}
 {cluster_specific_headers}#SBATCH --output={abs_out_dir}/{design_name}/logs/slurm-%A_%a.out
 
@@ -70,25 +70,51 @@ echo "Targeting Backbone Block Range: $START_NUM to $(( START_NUM + NUM_DESIGNS 
 echo "Generating $NUM_DESIGNS designs on Node: $SLURMD_NODENAME"
 echo "=========================================================="
 
-singularity exec --nv \\
-    -B /home/jflucier/programs/RFdiffusion:/home/jflucier/programs/RFdiffusion \\
-    -B /home/jflucier/programs/RFdiffusion/schedules:/opt/RFdiffusion/schedules \\
-    -B {abs_in_dir}:{abs_in_dir} \\
-    -B {abs_out_dir}:{abs_out_dir} \\
-    {container_sif} \\
-    python3 /opt/RFdiffusion/scripts/run_inference.py \\
-    --config-name base \\
-    inference.output_prefix={output_prefix} \\
-    inference.num_designs=$NUM_DESIGNS \\
-    inference.design_startnum=$START_NUM \\
-    'contigmap.contigs=[{length} {chain}{lo}-{hi}/0]' \\
-    inference.input_pdb={pdb_path} \\
-    inference.cyclic=True \\
-    diffuser.T=50 \\
-    inference.cyc_chains='a' \\
-    'ppi.hotspot_res=[{hotspot_list}]' \\
-    hydra.run.dir={hydra_log_dir}/task_$SLURM_ARRAY_TASK_ID \\
-    hydra.output_subdir={hydra_log_dir}/task_$SLURM_ARRAY_TASK_ID/hydra
+# Split this task's designs across WORKERS concurrent RFdiffusion processes that
+# share the one GPU (each design is small, so a single process leaves it mostly idle).
+WORKERS={workers}
+BASE=$(( NUM_DESIGNS / WORKERS ))
+EXTRA=$(( NUM_DESIGNS % WORKERS ))
+OFFSET=$START_NUM
+PIDS=""
+
+for W in $(seq 0 $(( WORKERS - 1 ))); do
+    N=$BASE
+    if [ $W -lt $EXTRA ]; then N=$(( N + 1 )); fi
+    if [ $N -le 0 ]; then continue; fi
+    echo "worker $W: $N designs starting at index $OFFSET"
+    singularity exec --nv \\
+        -B /home/jflucier/programs/RFdiffusion:/home/jflucier/programs/RFdiffusion \\
+        -B /home/jflucier/programs/RFdiffusion/schedules:/opt/RFdiffusion/schedules \\
+        -B {abs_in_dir}:{abs_in_dir} \\
+        -B {abs_out_dir}:{abs_out_dir} \\
+        {container_sif} \\
+        python3 /opt/RFdiffusion/scripts/run_inference.py \\
+        --config-name base \\
+        inference.output_prefix={output_prefix} \\
+        inference.num_designs=$N \\
+        inference.design_startnum=$OFFSET \\
+        'contigmap.contigs=[{length} {chain}{lo}-{hi}/0]' \\
+        inference.input_pdb={pdb_path} \\
+        inference.cyclic=True \\
+        diffuser.T=50 \\
+        inference.cyc_chains='a' \\
+        'ppi.hotspot_res=[{hotspot_list}]' \\
+        hydra.run.dir={hydra_log_dir}/task_${{SLURM_ARRAY_TASK_ID}}_w${{W}} \\
+        hydra.output_subdir={hydra_log_dir}/task_${{SLURM_ARRAY_TASK_ID}}_w${{W}}/hydra \\
+        > {hydra_log_dir}/worker_${{SLURM_ARRAY_JOB_ID}}_${{SLURM_ARRAY_TASK_ID}}_w${{W}}.log 2>&1 &
+    PIDS="$PIDS $!"
+    OFFSET=$(( OFFSET + N ))
+done
+
+FAIL=0
+for P in $PIDS; do
+    wait $P || FAIL=1
+done
+if [ $FAIL -ne 0 ]; then
+    echo "At least one RFdiffusion worker failed; see worker_*.log in {hydra_log_dir}"
+    exit 1
+fi
 """
 
 
@@ -241,11 +267,23 @@ def main():
                     help="Total targeted number of backbones desired per run profile")
     ap.add_argument("--designs-per-job", type=int, default=600,
                     help="Number of designs generated per 6-hour window allocation slice")
+    ap.add_argument("--workers", type=int, default=1,
+                    help="Concurrent RFdiffusion processes sharing the one GPU inside each array task "
+                         "(each design uses only ~2 GB of GPU memory). Default 1 = previous behavior.")
+    ap.add_argument("--time", default="06:00:00", help="Slurm time limit per array task")
+    ap.add_argument("--cpus-per-task", type=int, default=None,
+                    help="Default: max(4, 2 x workers)")
+    ap.add_argument("--mem", default=None, help="Default: max(32, 8 x workers) GB")
     ap.add_argument("--cluster", default="", choices=["", "gh"],
                     help="Target cluster profiling configuration ruleset selection")
     ap.add_argument("--queue", default="",
                     help="The partition destination queue required when --cluster=gh is set")
     args = ap.parse_args()
+
+    if args.workers < 1:
+        sys.exit("--workers must be >= 1")
+    cpus = args.cpus_per_task or max(4, 2 * args.workers)
+    mem = args.mem or f"{max(32, 8 * args.workers)}G"
 
     # Process cluster specific modifications
     clusterHeaders = ""
@@ -319,6 +357,7 @@ def main():
             script_text = SLURM_TEMPLATE.format(
                 design_name=name,
                 account=args.account,
+                time=args.time, cpus=cpus, mem=mem, workers=args.workers,
                 container_sif=args.container_sif,
                 abs_in_dir=str(pdb_path.parent),
                 abs_out_dir=str(out_dir),
