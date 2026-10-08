@@ -78,6 +78,11 @@ EXTRA=$(( NUM_DESIGNS % WORKERS ))
 OFFSET=$START_NUM
 PIDS=""
 
+export CUDA_MPS_PIPE_DIRECTORY=/tmp/nvidia-mps-$SLURM_JOB_ID
+export CUDA_MPS_LOG_DIRECTORY=/tmp/nvidia-log-$SLURM_JOB_ID
+mkdir -p "$CUDA_MPS_PIPE_DIRECTORY" "$CUDA_MPS_LOG_DIRECTORY"
+nvidia-cuda-mps-control -d
+
 for W in $(seq 0 $(( WORKERS - 1 ))); do
     N=$BASE
     if [ $W -lt $EXTRA ]; then N=$(( N + 1 )); fi
@@ -88,6 +93,7 @@ for W in $(seq 0 $(( WORKERS - 1 ))); do
         -B /home/jflucier/programs/RFdiffusion/schedules:/opt/RFdiffusion/schedules \\
         -B {abs_in_dir}:{abs_in_dir} \\
         -B {abs_out_dir}:{abs_out_dir} \\
+        -B $CUDA_MPS_PIPE_DIRECTORY \\
         {container_sif} \\
         python3 /opt/RFdiffusion/scripts/run_inference.py \\
         --config-name base \\
