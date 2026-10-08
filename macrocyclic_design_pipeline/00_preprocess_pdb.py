@@ -8,7 +8,7 @@ downloaded from the Protein Data Bank and stripped of all water and
 ligands, leaving just the target protein atoms."
 
 Reads the same targets TSV used by 01_build_rfpeptides_runs.py
-(design_name, pdb_path, hotspots[, length]), strips waters and
+(design_name, pdb_path, hotspots[, length][, target_pos]), strips waters and
 non-polymer/heteroatom records (crystallization additives, ions, small-
 molecule ligands, etc.) from each PDB, keeping only standard protein
 residues, and writes cleaned structures to 00_pdb_processed/.
@@ -16,6 +16,15 @@ residues, and writes cleaned structures to 00_pdb_processed/.
 Also writes an updated TSV (targets_processed.tsv, alongside the output
 dir) with pdb_path repointed at the cleaned files, so it can be handed
 straight to 01_build_rfpeptides_runs.py.
+
+Optional column target_pos: the target residues to design against, as one
+contiguous range in the input PDB's own numbering, e.g. "1-66" (a chain
+letter prefix such as "A1-66" is also accepted; it must match the hotspot
+chain). Empty/absent = whole target chain. The cleaned PDB is NOT cropped:
+cropping is applied by 01_build_rfpeptides_runs.py through the RFdiffusion
+contig, so hotspot numbering is unchanged. This script always writes the
+target_pos column to targets_processed.tsv (blank when not provided) and
+checks that the range lies inside the chain and contains every hotspot.
 
 Intended location on your system:
     /storage/Documents/service/biologie/rodrigue/programs/rodrigue_lab/macrocyclic_design_pipeline/scripts/00_preprocess_pdb.py
@@ -42,6 +51,7 @@ Notes:
 """
 import argparse
 import csv
+import re
 import sys
 from pathlib import Path
 
@@ -83,6 +93,41 @@ def strip_water_and_ligands(structure, keep_hetero=None):
     return structure[mask], int(n_removed)
 
 
+def check_target_pos(structure, hotspots_str: str, target_pos: str):
+    """Validate target_pos against the cleaned structure and the hotspots.
+    Returns (chain, lo, hi, full_lo, full_hi)."""
+    tokens = [t.strip() for t in hotspots_str.split(",") if t.strip()]
+    chains = {t[0] for t in tokens}
+    if len(chains) != 1:
+        raise ValueError(f"hotspots must all be on one chain, got: {hotspots_str!r}")
+    chain = chains.pop()
+
+    m = re.fullmatch(r"([A-Za-z]?)(\d+)\s*-\s*(\d+)", target_pos.strip())
+    if not m:
+        raise ValueError(f"target_pos {target_pos!r} must be one range like '1-66' or 'A1-66'")
+    tp_chain, lo, hi = m.group(1), int(m.group(2)), int(m.group(3))
+    if tp_chain and tp_chain != chain:
+        raise ValueError(f"target_pos chain {tp_chain} differs from hotspot chain {chain}")
+    if lo > hi:
+        raise ValueError(f"target_pos {lo}-{hi} is reversed")
+
+    mask = structure.chain_id == chain
+    if not mask.any():
+        raise ValueError(f"chain {chain} not found in cleaned structure")
+    full_lo, full_hi = int(structure.res_id[mask].min()), int(structure.res_id[mask].max())
+    if lo < full_lo or hi > full_hi:
+        raise ValueError(f"target_pos {lo}-{hi} is outside chain {chain} residues {full_lo}-{full_hi}")
+
+    try:
+        positions = [int(t[1:]) for t in tokens]
+    except ValueError:
+        raise ValueError(f"cannot parse hotspot residue numbers in {hotspots_str!r}")
+    outside = [t for t, n in zip(tokens, positions) if not lo <= n <= hi]
+    if outside:
+        raise ValueError(f"hotspots outside target_pos {lo}-{hi}: {', '.join(outside)}")
+    return chain, lo, hi, full_lo, full_hi
+
+
 def write_pdb(structure, out_path: Path):
     out_file = pdb_io.PDBFile()
     pdb_io.set_structure(out_file, structure)
@@ -118,7 +163,9 @@ def main():
         missing = required - set(reader.fieldnames or [])
         if missing:
             sys.exit(f"TSV missing required columns: {missing}")
-        fieldnames = reader.fieldnames
+        fieldnames = list(reader.fieldnames)
+        if "target_pos" not in fieldnames:
+            fieldnames.append("target_pos")  # always emitted, blank if not provided
         rows = list(reader)
 
     out_rows = []
@@ -140,8 +187,21 @@ def main():
         print(f"[{name}] {in_path.name}: removed {n_removed}/{n_atoms_before} "
               f"non-protein atoms -> {out_path}")
 
+        target_pos = (row.get("target_pos") or "").strip()
+        if target_pos:
+            try:
+                chain, lo, hi, full_lo, full_hi = check_target_pos(
+                    cleaned, row["hotspots"], target_pos)
+            except ValueError as e:
+                sys.exit(f"[{name}] {e}")
+            print(f"[{name}] target_pos {target_pos}: chain {chain} residues {lo}-{hi} "
+                  f"({hi - lo + 1} of {full_hi - full_lo + 1}); hotspots inside range")
+        else:
+            print(f"[{name}] no target_pos: whole target will be used")
+
         new_row = dict(row)
         new_row["pdb_path"] = str(out_path)
+        new_row["target_pos"] = target_pos
         out_rows.append(new_row)
 
     with open(out_tsv, "w", newline="") as fh:

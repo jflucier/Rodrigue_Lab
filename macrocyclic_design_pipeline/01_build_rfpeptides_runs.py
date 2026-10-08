@@ -2,8 +2,19 @@
 """
 01_build_rfpeptides_runs.py
 
-Reads a TSV of targets (design_name, pdb_path, hotspots[, length]) and
-writes one runnable Slurm sbatch script per row (.slurm).
+Reads a TSV of targets (design_name, pdb_path, hotspots[, length][, target_pos])
+and writes one runnable Slurm sbatch script per row (.slurm).
+
+Optional column target_pos: one contiguous residue range of the target chain
+to design against, in the input PDB's numbering ("1-66" or "A1-66"). It
+replaces the whole-chain range in the RFdiffusion contig, so the rest of the
+target is simply not given to the model. Hotspots keep the PDB's own
+numbering and must all lie inside target_pos. Empty/absent = whole chain.
+
+Each design directory records its contig/hotspot parameters in
+run_params.json. If outputs already exist there from a run with DIFFERENT
+parameters (e.g. you added a crop), the script stops instead of mixing them;
+use a new design_name or delete the old outputs.
 
 Automatically inspects target folders to see which 6-hour chunks (tasks)
 have already completed all their PDB outputs, creating a custom sparse
@@ -12,6 +23,7 @@ and safely pick up unfinished work.
 """
 import argparse
 import csv
+import json
 import sys
 import math
 import re
@@ -109,6 +121,49 @@ def parse_hotspots(hotspot_str: str):
             f"All hotspots in one row must be on the same chain, got: {hotspot_str}"
         )
     return chains.pop(), tokens
+
+
+def resolve_target_pos(target_pos: str, chain: str, full_lo: int, full_hi: int, hotspot_tokens):
+    """Parse target_pos and validate it. Returns (lo, hi)."""
+    m = re.fullmatch(r"([A-Za-z]?)(\d+)\s*-\s*(\d+)", target_pos.strip())
+    if not m:
+        raise ValueError(
+            f"target_pos {target_pos!r} must be a single range like '1-66' or 'A1-66'")
+    tp_chain, lo, hi = m.group(1), int(m.group(2)), int(m.group(3))
+    if tp_chain and tp_chain != chain:
+        raise ValueError(f"target_pos chain {tp_chain} differs from hotspot chain {chain}")
+    if lo > hi:
+        raise ValueError(f"target_pos {lo}-{hi} is reversed")
+    if lo < full_lo or hi > full_hi:
+        raise ValueError(
+            f"target_pos {lo}-{hi} is outside chain {chain} residues {full_lo}-{full_hi}")
+    try:
+        positions = [int(t[1:]) for t in hotspot_tokens]
+    except ValueError:
+        raise ValueError(f"cannot parse hotspot residue numbers in {hotspot_tokens}")
+    outside = [t for t, n in zip(hotspot_tokens, positions) if not lo <= n <= hi]
+    if outside:
+        raise ValueError(f"hotspots outside target_pos {lo}-{hi}: {', '.join(outside)}")
+    return lo, hi
+
+
+def check_run_params(design_out_dir: Path, params: dict, name: str):
+    """Refuse to continue a design directory that was generated with other parameters."""
+    params_file = design_out_dir / "run_params.json"
+    has_outputs = any(design_out_dir.glob("diffused_binder_cyclic_*.pdb"))
+    if params_file.exists():
+        old = json.loads(params_file.read_text())
+        if old != params:
+            diff = {k: (old.get(k), params.get(k)) for k in set(old) | set(params)
+                    if old.get(k) != params.get(k)}
+            sys.exit(f"[{name}] existing outputs in {design_out_dir} were generated with "
+                     f"different parameters (old, new): {diff}\n"
+                     f"Use a new design_name or delete the old outputs.")
+    elif has_outputs:
+        print(f"[{name}] WARNING: {design_out_dir} already holds designs but no run_params.json; "
+              f"cannot verify they match the current contig/hotspots. Not recording parameters.")
+        return
+    params_file.write_text(json.dumps(params, indent=2) + "\n")
 
 
 def find_missing_tasks(design_out_dir: Path, total_designs: int, designs_per_task: int) -> list:
@@ -230,12 +285,22 @@ def main():
                 structure = load_structure(str(pdb_path))
                 chain, hotspot_tokens = parse_hotspots(hotspots_str)
                 lo, hi = chain_residue_range(structure, chain)
+                full_lo, full_hi = lo, hi
+                target_pos = (row.get("target_pos") or "").strip()
+                if target_pos:
+                    lo, hi = resolve_target_pos(target_pos, chain, full_lo, full_hi,
+                                                hotspot_tokens)
             except Exception as e:
                 sys.exit(f"[{name}] failed to process: {e}")
 
             hotspot_list = ",".join(hotspot_tokens)
             design_out_dir = out_dir / name
             design_out_dir.mkdir(exist_ok=True)
+            print(f"[{name}] target {chain}{lo}-{hi} ({hi - lo + 1} of {full_hi - full_lo + 1} "
+                  f"residues); hotspots: {hotspot_list}")
+            check_run_params(design_out_dir, {
+                "pdb_path": str(pdb_path), "length": length,
+                "target": f"{chain}{lo}-{hi}", "hotspots": hotspot_list}, name)
 
             hydra_log_dir = design_out_dir / "logs"
             hydra_log_dir.mkdir(exist_ok=True)
