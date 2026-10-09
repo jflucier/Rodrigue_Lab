@@ -271,9 +271,9 @@ def main():
                     help="Macrocycle length used when a row has no 'length' column")
     ap.add_argument("--num-designs", type=int, default=10000,
                     help="Total targeted number of backbones desired per run profile")
-    ap.add_argument("--designs-per-job", type=int, default=600,
-                    help="Number of designs generated per 6-hour window allocation slice")
-    ap.add_argument("--workers", type=int, default=1,
+    ap.add_argument("--designs-per-job", type=int, default=1500,
+                    help="Number of designs generated per 1-hour window allocation slice")
+    ap.add_argument("--workers", type=int, default=36,
                     help="Concurrent RFdiffusion processes sharing the one GPU inside each array task "
                          "(each design uses only ~2 GB of GPU memory). Default 1 = previous behavior.")
     ap.add_argument("--time", default="01:00:00", help="Slurm time limit per array task")
