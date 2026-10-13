@@ -22,6 +22,7 @@ from io import StringIO
 from pyrosetta import init, pose_from_pdb
 from pyrosetta.io import pose_from_pdbstring
 from pyrosetta.rosetta.core.scoring import CA_rmsd
+import pyrosetta.rosetta.core.chemical as core_chemical
 import pyrosetta.rosetta.protocols.rosetta_scripts as rosetta_scripts
 from pyrosetta.rosetta.protocols.simple_moves import MutateResidue
 from pyrosetta.rosetta.protocols.simple_moves import CyclizationMover
@@ -84,6 +85,10 @@ def load_pose_with_ter_fix(pdb_path):
     last_chain = None
 
     for line in raw_lines:
+        # Prevent any leftover connection definitions from bleeding into the new map
+        if line.startswith(("LINK", "CONECT", "SSBOND")):
+            continue
+
         if line.startswith("ATOM  "):
             current_chain = line[21]  # Extract Chain ID column
             if last_chain == "A" and current_chain == "B":
@@ -111,24 +116,28 @@ def get_previous_round_path(out_pdb):
     return None
 
 def run_job(in_pdb, fasta, out_pdb, fr):
+    # --- 1. FORCE THE CHEMICAL MANAGER CONSTRAINTS TO RESET ---
+    # Wipes internal cache structures inside the C++ Chemical Manager to clear residue type drift
+    core_chemical.ChemicalManager.get_instance().rebuild_type_set("fa_standard")
+
     seq = read_designed_sequence(fasta)
 
-    raw_lines = Path(in_pdb).read_text().splitlines()
-    fixed_lines = []
-    last_chain = None
-
-    for line in raw_lines:
-        if line.startswith("ATOM  "):
-            current_chain = line[21]  # Extract the Chain ID column
-            # If we just finished reading Chain A and are moving to Chain B, insert a TER record
-            if last_chain == "A" and current_chain == "B":
-                fixed_lines.append("TER")
-            last_chain = current_chain
-        fixed_lines.append(line)
-
-    # pose = pose_from_pdb(in_pdb)
-    pdb_string_data = "\n".join(fixed_lines)
-    pose = pose_from_pdbstring(pdb_string_data)
+    # raw_lines = Path(in_pdb).read_text().splitlines()
+    # fixed_lines = []
+    # last_chain = None
+    #
+    # for line in raw_lines:
+    #     if line.startswith("ATOM  "):
+    #         current_chain = line[21]  # Extract the Chain ID column
+    #         # If we just finished reading Chain A and are moving to Chain B, insert a TER record
+    #         if last_chain == "A" and current_chain == "B":
+    #             fixed_lines.append("TER")
+    #         last_chain = current_chain
+    #     fixed_lines.append(line)
+    #
+    # # pose = pose_from_pdb(in_pdb)
+    # pdb_string_data = "\n".join(fixed_lines)
+    pose = pose_from_pdbstring(in_pdb)
 
     info = pose.pdb_info()
     chain_a = [i for i in range(1, pose.size() + 1) if info.chain(i) == "A"]
