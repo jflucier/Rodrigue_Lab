@@ -78,6 +78,13 @@ EXTRA=$(( NUM_DESIGNS % WORKERS ))
 OFFSET=$START_NUM
 PIDS=""
 
+# One CPU thread per worker process: many concurrent torch processes with default
+# thread pools oversubscribe the node.
+if [ "${WORKERS}" -gt 1 ]; then
+    export OMP_NUM_THREADS=1
+    export MKL_NUM_THREADS=1
+fi
+
 export CUDA_MPS_PIPE_DIRECTORY=/tmp/nvidia-mps-$SLURM_JOB_ID
 export CUDA_MPS_LOG_DIRECTORY=/tmp/nvidia-log-$SLURM_JOB_ID
 mkdir -p "$CUDA_MPS_PIPE_DIRECTORY" "$CUDA_MPS_LOG_DIRECTORY"
