@@ -108,7 +108,7 @@ def load_pose_with_ter_fix(pdb_path):
     clean_type_set = core_chemical.ChemicalManager.get_instance().residue_type_set("fa_standard")
 
     # 3. Read the coordinates straight into the pose using our isolated chemical slate
-    import_pose.pose_from_pdbstring(pose, pdb_string_data, clean_type_set)
+    import_pose.pose_from_pdbstring(pose, pdb_string_data, clean_type_set, "string_stream")
 
     return pose
 
