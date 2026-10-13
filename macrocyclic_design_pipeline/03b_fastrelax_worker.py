@@ -22,6 +22,9 @@ from io import StringIO
 from pyrosetta import init, pose_from_pdb
 from pyrosetta.io import pose_from_pdbstring
 from pyrosetta.rosetta.core.scoring import CA_rmsd
+
+import pyrosetta.rosetta.core.pose as core_pose
+import pyrosetta.rosetta.core.import_pose as import_pose
 import pyrosetta.rosetta.core.chemical as core_chemical
 import pyrosetta.rosetta.protocols.rosetta_scripts as rosetta_scripts
 from pyrosetta.rosetta.protocols.simple_moves import MutateResidue
@@ -96,7 +99,18 @@ def load_pose_with_ter_fix(pdb_path):
             last_chain = current_chain
         fixed_lines.append(line)
 
-    return pose_from_pdbstring("\n".join(fixed_lines))
+    pdb_string_data = "\n".join(fixed_lines)
+    # 1. Create a completely empty, uninitialized pose container
+    pose = core_pose.Pose()
+
+    # 2. Query a fresh, untouched copy of the standard all-atom chemical properties
+    # This bypasses the corrupted residue variations lingering in memory from previous iterations
+    clean_type_set = core_chemical.ChemicalManager.get_instance().nonconst_residue_type_set("fa_standard")
+
+    # 3. Read the coordinates straight into the pose using our isolated chemical slate
+    import_pose.pose_from_pdbstring(pose, pdb_string_data, clean_type_set)
+
+    return pose
 
 def get_previous_round_path(out_pdb):
     """
@@ -116,9 +130,6 @@ def get_previous_round_path(out_pdb):
     return None
 
 def run_job(in_pdb, fasta, out_pdb, fr):
-    # --- 1. FORCE THE CHEMICAL MANAGER CONSTRAINTS TO RESET ---
-    # Wipes internal cache structures inside the C++ Chemical Manager to clear residue type drift
-    core_chemical.ChemicalManager.get_instance().rebuild_type_set("fa_standard")
 
     seq = read_designed_sequence(fasta)
 
@@ -137,7 +148,10 @@ def run_job(in_pdb, fasta, out_pdb, fr):
     #
     # # pose = pose_from_pdb(in_pdb)
     # pdb_string_data = "\n".join(fixed_lines)
-    pose = pose_from_pdbstring(in_pdb)
+    # pose = pose_from_pdbstring(in_pdb)
+
+    # Safely creates an uncorrupted structural layout via our fresh type-set injector
+    pose = load_pose_with_ter_fix(in_pdb)
 
     info = pose.pdb_info()
     chain_a = [i for i in range(1, pose.size() + 1) if info.chain(i) == "A"]
