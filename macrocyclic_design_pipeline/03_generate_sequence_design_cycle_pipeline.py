@@ -322,7 +322,7 @@ if [ -s "${JOBS_TSV}" ]; then
         python3 "${OUT}/03b_fastrelax_worker.py" \
         --jobs-tsv "${JOBS_TSV}" \
         --xml "${OUT}/fast_relax_cyclize.xml" \
-        --isolate
+        --isolate --debug
 else
     echo "Nothing to relax in this chunk."
 fi
