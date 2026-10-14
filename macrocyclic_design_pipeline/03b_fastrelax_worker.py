@@ -12,9 +12,18 @@ Runs INSIDE the container (PyRosetta). For each job in a TSV
 PyRosetta is initialised once and the XML movers are built once per
 process, so a whole chunk of backbones is handled per container launch.
 A failure on one job is logged and does not stop the rest.
+
+--isolate runs every job in its own fresh Python/PyRosetta process. Use it if a
+design fails inside a chunk but succeeds when run alone (PyRosetta keeps global
+residue-type state across jobs), or to survive Rosetta calls that kill the
+whole process. It costs one PyRosetta init + XML parse per job, small next to
+FastRelax.
 """
 import argparse
+import os
+import subprocess
 import sys
+import tempfile
 import traceback
 from pathlib import Path
 from io import StringIO
@@ -77,6 +86,24 @@ def terminus_gap(pose, chain_a):
     n_xyz = first_res.xyz("N")
     c_xyz = last_res.xyz("C")
     return (n_xyz - c_xyz).norm()
+
+def describe_chain_a(pose, chain_a, seq):
+    """Diagnostics printed when the first cyclization step fails (best effort)."""
+    try:
+        print(f"  [DIAG] chain A: {len(chain_a)} residues, designed seq {seq}", flush=True)
+        for label, idx in (("first", chain_a[0]), ("last", chain_a[-1])):
+            r = pose.residue(idx)
+            print(f"  [DIAG] {label}: pose {idx} {r.type().name()} "
+                  f"lower_terminus={r.is_lower_terminus()} upper_terminus={r.is_upper_terminus()}",
+                  flush=True)
+        print(f"  [DIAG] N(first)-C(last) distance = {terminus_gap(pose, chain_a):.2f} A", flush=True)
+        gaps = [(pose.residue(a).xyz("C") - pose.residue(b).xyz("N")).norm()
+                for a, b in zip(chain_a[:-1], chain_a[1:])]
+        print(f"  [DIAG] max consecutive C(i)-N(i+1) distance = {max(gaps):.2f} A "
+              f"(~1.33 expected)", flush=True)
+    except Exception as e:
+        print(f"  [DIAG] could not collect diagnostics: {e}", flush=True)
+
 
 def load_pose_with_ter_fix(pdb_path):
     """
@@ -181,7 +208,11 @@ def run_job(in_pdb, fasta, out_pdb, fr):
     # 2. OVERRIDE THE XML AUTO-DETECTION: Explicitly lock the 13-residue cycle
     # Syntax: CyclizationMover( chain_number, add_constraints, minimize, build_conformation )
     python_cyclizer = CyclizationMover(1, True, True, 1)
-    python_cyclizer.apply(pose)
+    try:
+        python_cyclizer.apply(pose)
+    except Exception:
+        describe_chain_a(pose, chain_a, seq)
+        raise
 
     prev_pdb_path = get_previous_round_path(out_pdb)
     if prev_pdb_path:
@@ -218,6 +249,28 @@ def run_job(in_pdb, fasta, out_pdb, fr):
     # Path(out_pdb).write_text("\n".join(clean_pdb_lines))
 
 
+def run_isolated(jobs, args):
+    """One fresh interpreter per job. Returns the number of failed jobs."""
+    script = str(Path(__file__).resolve())
+    n_fail = 0
+    for k, job in enumerate(jobs, 1):
+        print(f"[{k}/{len(jobs)}] {job[0]}  (isolated process)", flush=True)
+        with tempfile.NamedTemporaryFile("w", suffix=".tsv", delete=False) as fh:
+            fh.write("\t".join(job) + "\n")
+            tmp = fh.name
+        cmd = [sys.executable, script, "--jobs-tsv", tmp, "--xml", args.xml, "--child"]
+        if args.debug:
+            cmd.append("--debug")
+        try:
+            rc = subprocess.run(cmd).returncode
+        finally:
+            os.unlink(tmp)
+        if rc != 0:
+            n_fail += 1
+            print(f"[WARN] isolated job failed (exit code {rc}) for {job[0]}", flush=True)
+    return n_fail
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                   formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -229,17 +282,27 @@ def main():
                           "established, instead of just the later CountPairFactory "
                           "assertion. Much noisier; use on a small --jobs-tsv of "
                           "just the failing backbones, not a full production chunk.")
+    ap.add_argument("--isolate", action="store_true",
+                    help="Run each job in a fresh Python/PyRosetta process (see module docstring)")
+    ap.add_argument("--child", action="store_true", help=argparse.SUPPRESS)
     args = ap.parse_args()
+
+    jobs = [l.rstrip("\n").split("\t") for l in Path(args.jobs_tsv).read_text().splitlines() if l.strip()]
+
+    if args.isolate and not args.child:
+        n_fail = run_isolated(jobs, args)
+        print(f"Done: {len(jobs) - n_fail}/{len(jobs)} succeeded", flush=True)
+        return
 
     init("-beta_nov16" if args.debug else "-beta_nov16 -mute all")
     objs = rosetta_scripts.XmlObjects.create_from_file(args.xml)
     fr = objs.get_mover("full_relax_complex")
     # pcm = objs.get_mover("pcm")
 
-    jobs = [l.rstrip("\n").split("\t") for l in Path(args.jobs_tsv).read_text().splitlines() if l.strip()]
     n_fail = 0
     for k, (in_pdb, fasta, out_pdb) in enumerate(jobs, 1):
-        print(f"[{k}/{len(jobs)}] {in_pdb}", flush=True)
+        if not args.child:
+            print(f"[{k}/{len(jobs)}] {in_pdb}", flush=True)
         try:
             # run_job(in_pdb, fasta, out_pdb, pcm, fr)
             run_job(in_pdb, fasta, out_pdb, fr)
@@ -248,6 +311,8 @@ def main():
             print(f"[WARN] job failed for {in_pdb}:", flush=True)
             traceback.print_exc()
             sys.stdout.flush()
+    if args.child:
+        sys.exit(1 if n_fail else 0)
     print(f"Done: {len(jobs) - n_fail}/{len(jobs)} succeeded", flush=True)
 
 

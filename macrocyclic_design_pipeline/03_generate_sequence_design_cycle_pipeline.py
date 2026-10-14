@@ -321,7 +321,8 @@ if [ -s "${JOBS_TSV}" ]; then
     singularity exec --pwd /tmp -B __BIND_PATH__ __SIF__ \
         python3 "${OUT}/03b_fastrelax_worker.py" \
         --jobs-tsv "${JOBS_TSV}" \
-        --xml "${OUT}/fast_relax_cyclize.xml"
+        --xml "${OUT}/fast_relax_cyclize.xml" \
+        --isolate
 else
     echo "Nothing to relax in this chunk."
 fi
