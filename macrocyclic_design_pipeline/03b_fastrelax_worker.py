@@ -215,7 +215,7 @@ def run_job(in_pdb, fasta, out_pdb, fr):
     core_conformation.update_cutpoint_virtual_atoms_if_connected(pose.conformation(), end_res, True)
 
 
-prev_pdb_path = get_previous_round_path(out_pdb)
+    prev_pdb_path = get_previous_round_path(out_pdb)
     if prev_pdb_path:
         try:
             prev_pose = load_pose_with_ter_fix(prev_pdb_path)

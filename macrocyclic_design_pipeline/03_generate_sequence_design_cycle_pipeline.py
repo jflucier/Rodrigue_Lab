@@ -198,7 +198,7 @@ process_backbone() {
             SUCCESS=true
             break
         else
-            echo "[ERROR] ${STEM}: No sequence in the 20-sample batch satisfied your criteria at T=${TEMP}."
+            echo "[WARN] ${STEM}: No sequence in the 20-sample batch satisfied your criteria at T=${TEMP}."
             rm -rf "${ROUND_DIR}/seqs" "${ROUND_DIR}/scores"
         fi
 
