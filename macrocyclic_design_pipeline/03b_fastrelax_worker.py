@@ -217,6 +217,7 @@ def run_job(in_pdb, fasta, out_pdb, fr):
     fr.apply(pose)
 
     prev_pdb_path = get_previous_round_path(out_pdb)
+    print(f"prev_pdb_path={prev_pdb_path}")
     if prev_pdb_path:
         try:
             prev_pose = load_pose_with_ter_fix(prev_pdb_path)
