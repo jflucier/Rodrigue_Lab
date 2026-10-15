@@ -176,9 +176,15 @@ def run_job(in_pdb, fasta, out_pdb, fr):
         mutator.set_res_name(AA_1TO3[aa])
         mutator.apply(pose)
 
+    is_gly_first = (seq[0] == "G")
+    if is_gly_first:
+        mutator.set_target(chain_a[0])
+        mutator.set_res_name("ALA")
+        mutator.apply(pose)
+
     # 2. OVERRIDE THE XML AUTO-DETECTION: Explicitly lock the 13-residue cycle
     # Syntax: CyclizationMover( chain_number, add_constraints, minimize, build_conformation )
-    python_cyclizer = CyclizationMover(1, True, True, 0)
+    python_cyclizer = CyclizationMover(1, True, True, 1)
     try:
         print("bef")
         python_cyclizer.apply(pose)
@@ -186,6 +192,13 @@ def run_job(in_pdb, fasta, out_pdb, fr):
     except Exception:
         describe_chain_a(pose, chain_a, seq)
         raise
+
+    # Mutate position 1 back to your true designed Glycine sequence
+    # now that the cyclic backbone bonds have been established securely
+    if is_gly_first:
+        mutator.set_target(chain_a[0])
+        mutator.set_res_name("GLY")
+        mutator.apply(pose)
 
     prev_pdb_path = get_previous_round_path(out_pdb)
     if prev_pdb_path:
