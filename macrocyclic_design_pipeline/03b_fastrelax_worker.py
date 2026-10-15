@@ -38,6 +38,7 @@ import pyrosetta.rosetta.core.chemical as core_chemical
 import pyrosetta.rosetta.protocols.rosetta_scripts as rosetta_scripts
 from pyrosetta.rosetta.protocols.simple_moves import MutateResidue
 from pyrosetta.rosetta.protocols.simple_moves import CyclizationMover
+import pyrosetta.rosetta.core.conformation as core_conformation
 
 AA_1TO3 = {
     'A': 'ALA', 'C': 'CYS', 'D': 'ASP', 'E': 'GLU', 'F': 'PHE',
@@ -147,7 +148,6 @@ def get_previous_round_path(out_pdb):
     out_path = Path(out_pdb)
     name = out_path.stem
 
-    print(f"in get_previous_round_path: out_path={out_path} name={name}")
     # Check if the name ends with an explicit round tracker index suffix
     for i in range(2, 6):  # Checks rounds 2, 3, 4, 5
         if name.endswith(f"_r{i}"):
@@ -192,7 +192,6 @@ def run_job(in_pdb, fasta, out_pdb, fr):
     #     describe_chain_a(pose, chain_a, seq)
     #     raise
 
-    import pyrosetta.rosetta.core.conformation as core_conformation
     # 2. Bypassing CyclizationMover: Explicitly link head-to-tail atoms
     start_res = chain_a[0]  # Typically residue 1
     end_res = chain_a[-1]  # Your true macrocycle endpoint (e.g., residue 11)
@@ -222,7 +221,6 @@ def run_job(in_pdb, fasta, out_pdb, fr):
     fr.apply(pose)
 
     prev_pdb_path = get_previous_round_path(out_pdb)
-    print(f"prev_pdb_path={prev_pdb_path} out_pdb={out_pdb}")
     if prev_pdb_path:
         try:
             prev_pose = load_pose_with_ter_fix(prev_pdb_path)
