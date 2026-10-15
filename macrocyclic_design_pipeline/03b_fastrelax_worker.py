@@ -241,7 +241,7 @@ def run_job(in_pdb, fasta, out_pdb, fr):
         except Exception:
             print(f"  --> [NOTE] Failed to calculate backbone RMSD comparison vs. Round {prev_round_idx}.", flush=True)
 
-pose.dump_pdb(out_pdb)
+    pose.dump_pdb(out_pdb)
 
 
 def run_isolated(jobs, args):
