@@ -188,7 +188,6 @@ def run_job(in_pdb, fasta, out_pdb, fr):
     #     raise
 
     import pyrosetta.rosetta.core.conformation as core_conformation
-    import pyrosetta.rosetta.core.chemical.VariantType as VariantType
     # 2. Bypassing CyclizationMover: Explicitly link head-to-tail atoms
     start_res = chain_a[0]  # Typically residue 1
     end_res = chain_a[-1]  # Your true macrocycle endpoint (e.g., residue 11)
