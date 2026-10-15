@@ -149,8 +149,8 @@ def get_previous_round_path(out_pdb):
 
     # Check if the name ends with an explicit round tracker index suffix
     for i in range(2, 6):  # Checks rounds 2, 3, 4, 5
-        if name.endswith(f"_mpnn{i}"):
-            prev_name = name.replace(f"_mpnn{i}", f"_mpnn{i - 1}")
+        if name.endswith(f"_r{i}"):
+            prev_name = name.replace(f"_r{i}", f"_r{i - 1}")
             prev_path = out_path.with_name(prev_name + out_path.suffix)
             if prev_path.exists():
                 return prev_path
@@ -213,6 +213,9 @@ def run_job(in_pdb, fasta, out_pdb, fr):
     core_conformation.update_cutpoint_virtual_atoms_if_connected(pose.conformation(), start_res, True)
     core_conformation.update_cutpoint_virtual_atoms_if_connected(pose.conformation(), end_res, True)
 
+    # 3. Execute your interface relaxation safely
+    fr.apply(pose)
+
     prev_pdb_path = get_previous_round_path(out_pdb)
     if prev_pdb_path:
         try:
@@ -221,10 +224,6 @@ def run_job(in_pdb, fasta, out_pdb, fr):
             print(f"  --> Macrocycle backbone drift vs. previous round: {drift:.4f} A", flush=True)
         except Exception:
             print("  --> [NOTE] Failed to calculate backbone RMSD comparison.", flush=True)
-
-    # pcm.apply(pose)
-    # 3. Execute your interface relaxation safely
-    fr.apply(pose)
 
     pose.dump_pdb(out_pdb)
 
