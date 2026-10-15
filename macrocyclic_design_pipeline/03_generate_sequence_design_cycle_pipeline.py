@@ -21,7 +21,10 @@ only the MPNN step gets --nv.
 --mpnn-workers N runs N concurrent ProteinMPNN processes per MPNN array task on
 the one GPU (a single process uses only a small fraction of it). Each task's
 chunk is split across the workers (strided); with N > 1 CUDA MPS is started per
-task unless --no-mps is given. FastRelax is CPU-only and is unchanged.
+task unless --no-mps is given.
+
+--relax-cpus N runs N concurrent FastRelax worker processes per relax array task
+(each takes a strided shard of the chunk's jobs list; one thread each).
 
 Generated in --out-dir:
     backbones.list            stem<TAB>abs_path, one per line
@@ -54,6 +57,7 @@ MPNN_TEMPLATE = r"""#!/bin/bash
 #SBATCH --cpus-per-task=__MPNN_CPUS__
 #SBATCH --mem=__MPNN_MEM__
 #SBATCH --time=__MPNN_TIME__
+#SBATCH --requeue
 
 # Expects ROUND in the environment (set by submit_all.sh via --export).
 set -uo pipefail
@@ -283,6 +287,7 @@ set -uo pipefail
 OUT="__OUT__"
 LIST="${OUT}/backbones.list"
 CHUNK=__CHUNK__
+WORKERS=__RELAX_CPUS__
 
 TOTAL=$(wc -l < "${LIST}")
 START=$(( (SLURM_ARRAY_TASK_ID - 1) * CHUNK + 1 ))
@@ -318,10 +323,38 @@ for IDX in $(seq "${START}" "${END}"); do
 done
 
 if [ -s "${JOBS_TSV}" ]; then
-    singularity exec --pwd /tmp -B __BIND_PATH__ __SIF__ \
-        python3 "${OUT}/03b_fastrelax_worker.py" \
-        --jobs-tsv "${JOBS_TSV}" \
-        --xml "${OUT}/fast_relax_cyclize.xml"
+    NJOBS=$(wc -l < "${JOBS_TSV}")
+    W=${WORKERS}
+    [ "${W}" -gt "${NJOBS}" ] && W=${NJOBS}
+    echo "Relaxing ${NJOBS} backbone(s) with ${W} parallel worker(s)"
+
+    # FastRelax is single-threaded: one thread per process, parallelism comes from
+    # running independent worker processes on disjoint shards of the jobs list.
+    export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
+
+    PIDS=()
+    for (( k=0; k<W; k++ )); do
+        SHARD="${OUT}/logs/relax_r${ROUND}_task${SLURM_ARRAY_TASK_ID}.shard${k}.tsv"
+        SLOG="${OUT}/logs/relax_r${ROUND}_task${SLURM_ARRAY_TASK_ID}.shard${k}.log"
+        WD="/tmp/relax_${SLURM_JOB_ID}_${k}"      # private cwd per worker (no scratch-file clashes)
+        mkdir -p "${WD}"
+        # strided split so each shard gets a similar mix of backbones
+        awk -v n="${W}" -v k="${k}" '(NR-1)%n==k' "${JOBS_TSV}" > "${SHARD}"
+        singularity exec --pwd "${WD}" -B __BIND_PATH__ __SIF__ \
+            python3 "${OUT}/03b_fastrelax_worker.py" \
+            --jobs-tsv "${SHARD}" \
+            --xml "${OUT}/fast_relax_cyclize.xml" > "${SLOG}" 2>&1 &
+        PIDS+=($!)
+    done
+
+    FAIL=0
+    for k in "${!PIDS[@]}"; do
+        wait "${PIDS[$k]}" || { echo "[WARN] relax worker ${k} exited non-zero"; FAIL=1; }
+        echo "----- relax worker ${k} log -----"
+        cat "${OUT}/logs/relax_r${ROUND}_task${SLURM_ARRAY_TASK_ID}.shard${k}.log"
+        rm -rf "/tmp/relax_${SLURM_JOB_ID}_${k}"
+    done
+    exit ${FAIL}
 else
     echo "Nothing to relax in this chunk."
 fi
@@ -386,8 +419,10 @@ def main():
     ap.add_argument("--no-mps", action="store_true",
                     help="Do not start CUDA MPS when --mpnn-workers > 1")
     ap.add_argument("--relax-time", default="08:00:00")
-    ap.add_argument("--relax-mem", default="8G")
-    ap.add_argument("--relax-cpus", type=int, default=1)
+    ap.add_argument("--relax-mem", default=None, help="Default: max(8, 4 x relax-cpus) GB")
+    ap.add_argument("--relax-cpus", type=int, default=1,
+                    help="Parallel FastRelax worker processes per relax array task (also sets "
+                         "--cpus-per-task). Capped at the number of backbones in the chunk.")
     ap.add_argument("--submit", action="store_true", help="Run submit_all.sh after generating")
     args = ap.parse_args()
 
@@ -395,6 +430,9 @@ def main():
         sys.exit("--mpnn-workers must be >= 1")
     mpnn_cpus = args.mpnn_cpus or max(2, args.mpnn_workers)
     mpnn_mem = args.mpnn_mem or f"{max(16, 4 * args.mpnn_workers)}G"
+    if args.relax_cpus < 1:
+        sys.exit("--relax-cpus must be >= 1")
+    relax_mem = args.relax_mem or f"{max(8, 4 * args.relax_cpus)}G"
     use_mps = 1 if (args.mpnn_workers > 1 and not args.no_mps) else 0
     if args.chunk_size < 4 * args.mpnn_workers:
         print(f"[NOTE] --chunk-size {args.chunk_size} gives each of {args.mpnn_workers} workers "
@@ -434,7 +472,7 @@ def main():
         "GPU_QUEUE": args.queue, "CPU_QUEUE": args.cpu_queue or args.queue,
         "MPNN_TIME": args.mpnn_time, "MPNN_MEM": mpnn_mem, "MPNN_CPUS": mpnn_cpus,
         "MPNN_WORKERS": args.mpnn_workers, "USE_MPS": use_mps,
-        "RELAX_TIME": args.relax_time, "RELAX_MEM": args.relax_mem, "RELAX_CPUS": args.relax_cpus,
+        "RELAX_TIME": args.relax_time, "RELAX_MEM": relax_mem, "RELAX_CPUS": args.relax_cpus,
         "N_TASKS": n_tasks, "MAX_CONC": args.max_concurrent, "N_ROUNDS": args.n_rounds,
     }
     (out_path / "mpnn_step.slurm").write_text(fill(MPNN_TEMPLATE, common))
@@ -447,6 +485,7 @@ def main():
     print(" SLURM job chain generated")
     print("=" * 78)
     print(f"Backbones: {len(pdbs)}  |  chunk size: {args.chunk_size}  |  array tasks/array: {n_tasks}")
+    print(f"Relax workers per task: {args.relax_cpus} (mem {relax_mem})")
     print(f"Rounds: {args.n_rounds}  ->  {2 * args.n_rounds} arrays (MPNN on {args.queue}, "
           f"relax on {args.cpu_queue or args.queue})")
     print(f"MPNN workers per task: {args.mpnn_workers} (cpus {mpnn_cpus}, mem {mpnn_mem}, "

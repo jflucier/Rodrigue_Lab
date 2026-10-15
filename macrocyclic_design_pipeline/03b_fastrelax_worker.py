@@ -297,7 +297,7 @@ def main():
     n_fail = 0
     for k, (in_pdb, fasta, out_pdb) in enumerate(jobs, 1):
         if not args.child:
-            print(f"[{k}/{len(jobs)}] {in_pdb}", flush=True)
+            print(f"[{k}/{len(jobs)}] relax input:{in_pdb}", flush=True)
         try:
             # run_job(in_pdb, fasta, out_pdb, pcm, fr)
             run_job(in_pdb, fasta, out_pdb, fr)
