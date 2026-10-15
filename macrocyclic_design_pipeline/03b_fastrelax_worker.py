@@ -152,7 +152,11 @@ def get_previous_round_path(out_pdb):
     for i in range(2, 6):  # Checks rounds 2, 3, 4, 5
         if name.endswith(f"_r{i}"):
             prev_name = name.replace(f"_r{i}", f"_r{i - 1}")
-            prev_path = out_path.with_name(prev_name + out_path.suffix)
+
+            # Navigate two levels up: out_path.parent is 'round2', out_path.parent.parent is 'diffused_binder_cyclic_1000'
+            # Then build the relative path forward into 'round1'
+            prev_path = out_path.parent.parent / f"round{i - 1}" / (prev_name + out_path.suffix)
+
             if prev_path.exists():
                 return prev_path
     return None
