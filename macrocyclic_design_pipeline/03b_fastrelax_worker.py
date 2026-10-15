@@ -26,6 +26,7 @@ import sys
 import tempfile
 import traceback
 from pathlib import Path
+import re
 from io import StringIO
 
 from pyrosetta import init, pose_from_pdb
@@ -140,26 +141,33 @@ def load_pose_with_ter_fix(pdb_path):
 
     return pose
 
-def get_previous_round_path(out_pdb):
+
+def get_all_previous_round_paths(out_pdb):
     """
-    Deduces the path of the previous round's output file to compare RMSD.
-    Example: if out_pdb ends with '..._mpnn4.pdb', looks for '..._mpnn3.pdb'
+    Scans the cluster file system and returns an ordered list of paths
+    for ALL valid historical rounds preceding the current out_pdb file.
+    Example: if out_pdb is _r4, returns valid paths for _r1, _r2, and _r3.
     """
     out_path = Path(out_pdb)
     name = out_path.stem
 
-    # Check if the name ends with an explicit round tracker index suffix
-    for i in range(2, 6):  # Checks rounds 2, 3, 4, 5
-        if name.endswith(f"_r{i}"):
-            prev_name = name.replace(f"_r{i}", f"_r{i - 1}")
+    # Dynamically find the active round number matching the trailing index tag
+    match = re.search(r"_r(\d+)$", name)
+    if not match:
+        return []
 
-            # Navigate two levels up: out_path.parent is 'round2', out_path.parent.parent is 'diffused_binder_cyclic_1000'
-            # Then build the relative path forward into 'round1'
-            prev_path = out_path.parent.parent / f"round{i - 1}" / (prev_name + out_path.suffix)
+    current_round = int(match.group(1))
+    previous_paths = []
 
-            if prev_path.exists():
-                return prev_path
-    return None
+    # Iterate cleanly through all possible historical iterations up to current
+    for r in range(1, current_round):
+        prev_name = name.replace(f"_r{current_round}", f"_r{r}")
+        prev_path = out_path.parent.parent / f"round{r}" / (prev_name + out_path.suffix)
+
+        if prev_path.exists():
+            previous_paths.append((r, prev_path))
+
+    return previous_paths
 
 def run_job(in_pdb, fasta, out_pdb, fr):
 
@@ -220,16 +228,20 @@ def run_job(in_pdb, fasta, out_pdb, fr):
     # 3. Execute your interface relaxation safely
     fr.apply(pose)
 
-    prev_pdb_path = get_previous_round_path(out_pdb)
-    if prev_pdb_path:
+    # 3. Structural Comparison: Longitudinal Backbone Drift Tracking
+    # Grabs all valid predecessor file paths available across historical arrays
+    prev_round_records = get_all_previous_round_paths(out_pdb)
+
+    for prev_round_idx, prev_pdb_path in prev_round_records:
         try:
             prev_pose = load_pose_with_ter_fix(prev_pdb_path)
+            # Calculate CA_rmsd strictly over macrocycle Chain A boundaries
             drift = CA_rmsd(pose, prev_pose, 1, len(chain_a))
-            print(f"  --> Macrocycle backbone drift vs. previous round: {drift:.4f} A", flush=True)
+            print(f"  --> Macrocycle backbone drift vs. Round {prev_round_idx}: {drift:.4f} A", flush=True)
         except Exception:
-            print("  --> [NOTE] Failed to calculate backbone RMSD comparison.", flush=True)
+            print(f"  --> [NOTE] Failed to calculate backbone RMSD comparison vs. Round {prev_round_idx}.", flush=True)
 
-    pose.dump_pdb(out_pdb)
+pose.dump_pdb(out_pdb)
 
 
 def run_isolated(jobs, args):
