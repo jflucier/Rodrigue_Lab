@@ -180,7 +180,9 @@ def run_job(in_pdb, fasta, out_pdb, fr):
     # Syntax: CyclizationMover( chain_number, add_constraints, minimize, build_conformation )
     python_cyclizer = CyclizationMover(1, True, True, 0)
     try:
+        print("bef")
         python_cyclizer.apply(pose)
+        print("after")
     except Exception:
         describe_chain_a(pose, chain_a, seq)
         raise
