@@ -160,23 +160,6 @@ def run_job(in_pdb, fasta, out_pdb, fr):
 
     seq = read_designed_sequence(fasta)
 
-    # raw_lines = Path(in_pdb).read_text().splitlines()
-    # fixed_lines = []
-    # last_chain = None
-    #
-    # for line in raw_lines:
-    #     if line.startswith("ATOM  "):
-    #         current_chain = line[21]  # Extract the Chain ID column
-    #         # If we just finished reading Chain A and are moving to Chain B, insert a TER record
-    #         if last_chain == "A" and current_chain == "B":
-    #             fixed_lines.append("TER")
-    #         last_chain = current_chain
-    #     fixed_lines.append(line)
-    #
-    # # pose = pose_from_pdb(in_pdb)
-    # pdb_string_data = "\n".join(fixed_lines)
-    # pose = pose_from_pdbstring(in_pdb)
-
     # Safely creates an uncorrupted structural layout via our fresh type-set injector
     pose = load_pose_with_ter_fix(in_pdb)
 
@@ -186,18 +169,6 @@ def run_job(in_pdb, fasta, out_pdb, fr):
     if len(seq) != len(chain_a):
         raise ValueError(f"designed seq length {len(seq)} != chain A length "
                          f"{len(chain_a)} in {in_pdb}")
-    # bad = sorted(set(seq) - set(AA_1TO3))
-    # if bad:
-    #     raise ValueError(f"non-standard characters in designed sequence: {bad}")
-
-    # gap = terminus_gap(pose, chain_a)
-    # print(f"  threading {seq} onto chain A ({len(chain_a)} res), "
-    #       f"N-C terminus gap = {gap:.2f} A (expect ~1.3 A for a closed bond)",
-    #       flush=True)
-    # if gap > 3.0:
-    #     print(f"  [NOTE] gap is large -- this backbone's termini likely never "
-    #           f"closed during RFdiffusion sampling; a cyclization failure below "
-    #           f"is expected for this one, not a pipeline bug", flush=True)
 
     mutator = MutateResidue()
     for pose_idx, aa in zip(chain_a, seq):
@@ -207,7 +178,7 @@ def run_job(in_pdb, fasta, out_pdb, fr):
 
     # 2. OVERRIDE THE XML AUTO-DETECTION: Explicitly lock the 13-residue cycle
     # Syntax: CyclizationMover( chain_number, add_constraints, minimize, build_conformation )
-    python_cyclizer = CyclizationMover(1, True, True, 1)
+    python_cyclizer = CyclizationMover(1, True, True, 0)
     try:
         python_cyclizer.apply(pose)
     except Exception:
@@ -226,27 +197,8 @@ def run_job(in_pdb, fasta, out_pdb, fr):
     # pcm.apply(pose)
     # 3. Execute your interface relaxation safely
     fr.apply(pose)
-    # pcm.apply(pose)
-    # 4. Re-verify the loop constraints at the true 13-residue index endpoint
-    python_cyclizer.apply(pose)
 
     pose.dump_pdb(out_pdb)
-
-    # sio = StringIO()
-    # pose.dump_pdb(sio)
-    #
-    # Path(out_pdb).parent.mkdir(parents=True, exist_ok=True)
-    # pose.dump_pdb(out_pdb)
-    #
-    # rosetta_lines = Path(out_pdb).read_text().splitlines()
-    #
-    # # 2. Filter out non-standard structural records (like pose energy tables)
-    # clean_pdb_lines = [
-    #     line for line in rosetta_lines
-    #     if line.startswith(("ATOM", "HETATM", "TER", "ENDMDL", "END"))
-    # ]
-    #
-    # Path(out_pdb).write_text("\n".join(clean_pdb_lines))
 
 
 def run_isolated(jobs, args):
