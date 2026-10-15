@@ -147,6 +147,7 @@ def get_previous_round_path(out_pdb):
     out_path = Path(out_pdb)
     name = out_path.stem
 
+    print(f"in get_previous_round_path: out_path={out_path} name={name}")
     # Check if the name ends with an explicit round tracker index suffix
     for i in range(2, 6):  # Checks rounds 2, 3, 4, 5
         if name.endswith(f"_r{i}"):
@@ -217,7 +218,7 @@ def run_job(in_pdb, fasta, out_pdb, fr):
     fr.apply(pose)
 
     prev_pdb_path = get_previous_round_path(out_pdb)
-    print(f"prev_pdb_path={prev_pdb_path}")
+    print(f"prev_pdb_path={prev_pdb_path} out_pdb={out_pdb}")
     if prev_pdb_path:
         try:
             prev_pose = load_pose_with_ter_fix(prev_pdb_path)
