@@ -85,6 +85,35 @@ END=$(( SLURM_ARRAY_TASK_ID * CHUNK ))
 
 echo "=== MPNN round ${ROUND}, task ${SLURM_ARRAY_TASK_ID}, backbones ${START}-${END}, ${WORKERS} worker(s) ==="
 
+# Container image: optionally run from node-local scratch ($SLURM_TMPDIR) instead of
+# mounting the shared-filesystem .sif for every launch (squashfuse + network reads
+# dominated startup with many concurrent launches).
+#   none    : use the .sif as given
+#   copy    : copy the .sif to local scratch (still a squashfs mount, but local reads)
+#   sandbox : unpack the .sif to a directory on local scratch (no squashfuse at all)
+IMG="__SIF__"
+IMG_MODE="__IMG_MODE__"
+if [ "${IMG_MODE}" != "none" ]; then
+    if [ -z "${SLURM_TMPDIR:-}" ] || [ ! -d "${SLURM_TMPDIR}" ]; then
+        echo "[WARN] SLURM_TMPDIR not set, using the original image"
+    else
+        LOCAL_ROOT="${SLURM_TMPDIR}/img_${SLURM_JOB_ID}"
+        mkdir -p "${LOCAL_ROOT}"
+        T0=$(date +%s)
+        if [ "${IMG_MODE}" = "copy" ]; then
+            cp "__SIF__" "${LOCAL_ROOT}/image.sif" && IMG="${LOCAL_ROOT}/image.sif"
+        else
+            singularity build --sandbox "${LOCAL_ROOT}/sandbox" "__SIF__" > "${LOCAL_ROOT}/build.log" 2>&1 \
+                && IMG="${LOCAL_ROOT}/sandbox"
+        fi
+        if [ "${IMG}" = "__SIF__" ]; then
+            echo "[WARN] local image setup (${IMG_MODE}) failed, using the original image"
+            [ -f "${LOCAL_ROOT}/build.log" ] && tail -5 "${LOCAL_ROOT}/build.log"
+        fi
+        echo "image: ${IMG} (mode ${IMG_MODE}, setup $(( $(date +%s) - T0 )) s)"
+    fi
+fi
+
 # One CPU thread per worker process: many concurrent torch processes with default
 # thread pools oversubscribe the node.
 if [ "${WORKERS}" -gt 1 ]; then
@@ -151,7 +180,7 @@ process_backbone() {
     BIAS_JSON="${ROUND_DIR}/bias_AA.json"
     echo '{"S": 0.8}' > "${BIAS_JSON}"
 
-    if ! singularity exec --nv --pwd /tmp -B __BIND_PATH__ ${MPS_BIND} __SIF__ \
+    if ! singularity exec --nv --pwd /tmp -B __BIND_PATH__ ${MPS_BIND} "${IMG}" \
         python3 "${MPNN_SCRIPT}" \
         --pdb_path "${CURRENT_PDB}" \
         --pdb_path_chains "A" \
@@ -286,6 +315,35 @@ END=$(( SLURM_ARRAY_TASK_ID * CHUNK ))
 
 echo "=== FastRelax round ${ROUND}, task ${SLURM_ARRAY_TASK_ID}, backbones ${START}-${END} on $(hostname) ==="
 
+# Container image: optionally run from node-local scratch ($SLURM_TMPDIR) instead of
+# mounting the shared-filesystem .sif for every launch (squashfuse + network reads
+# dominated startup with many concurrent launches).
+#   none    : use the .sif as given
+#   copy    : copy the .sif to local scratch (still a squashfs mount, but local reads)
+#   sandbox : unpack the .sif to a directory on local scratch (no squashfuse at all)
+IMG="__SIF__"
+IMG_MODE="__IMG_MODE__"
+if [ "${IMG_MODE}" != "none" ]; then
+    if [ -z "${SLURM_TMPDIR:-}" ] || [ ! -d "${SLURM_TMPDIR}" ]; then
+        echo "[WARN] SLURM_TMPDIR not set, using the original image"
+    else
+        LOCAL_ROOT="${SLURM_TMPDIR}/img_${SLURM_JOB_ID}"
+        mkdir -p "${LOCAL_ROOT}"
+        T0=$(date +%s)
+        if [ "${IMG_MODE}" = "copy" ]; then
+            cp "__SIF__" "${LOCAL_ROOT}/image.sif" && IMG="${LOCAL_ROOT}/image.sif"
+        else
+            singularity build --sandbox "${LOCAL_ROOT}/sandbox" "__SIF__" > "${LOCAL_ROOT}/build.log" 2>&1 \
+                && IMG="${LOCAL_ROOT}/sandbox"
+        fi
+        if [ "${IMG}" = "__SIF__" ]; then
+            echo "[WARN] local image setup (${IMG_MODE}) failed, using the original image"
+            [ -f "${LOCAL_ROOT}/build.log" ] && tail -5 "${LOCAL_ROOT}/build.log"
+        fi
+        echo "image: ${IMG} (mode ${IMG_MODE}, setup $(( $(date +%s) - T0 )) s)"
+    fi
+fi
+
 JOBS_TSV="${OUT}/logs/relax_r${ROUND}_task${SLURM_ARRAY_TASK_ID}.tsv"
 : > "${JOBS_TSV}"
 
@@ -330,7 +388,7 @@ if [ -s "${JOBS_TSV}" ]; then
         mkdir -p "${WD}"
         # strided split so each shard gets a similar mix of backbones
         awk -v n="${W}" -v k="${k}" '(NR-1)%n==k' "${JOBS_TSV}" > "${SHARD}"
-        singularity exec --pwd "${WD}" -B __BIND_PATH__ __SIF__ \
+        singularity exec --pwd "${WD}" -B __BIND_PATH__ "${IMG}" \
             python3 "${OUT}/03b_fastrelax_worker.py" \
             --jobs-tsv "${SHARD}" \
             --xml "${OUT}/fast_relax_cyclize.xml" > "${SLOG}" 2>&1 &
@@ -400,7 +458,7 @@ def main():
                     help="Backbones handled per array task (default 20)")
     ap.add_argument("--max-concurrent", type=int, default=50,
                     help="Max simultaneously running array tasks per array (default 50)")
-    ap.add_argument("--mpnn-time", default="00:30:00")
+    ap.add_argument("--mpnn-time", default="02:00:00")
     ap.add_argument("--mpnn-mem", default=None, help="Default: max(16, 4 x workers) GB")
     ap.add_argument("--mpnn-cpus", type=int, default=None, help="Default: max(2, workers)")
     ap.add_argument("--mpnn-workers", type=int, default=1,
@@ -415,9 +473,14 @@ def main():
     ap.add_argument("--mpnn-batch-size", type=int, default=20,
                     help="ProteinMPNN --batch_size: samples decoded in parallel on the GPU. Must "
                          "divide --num-seq-per-temp. 1 = old behaviour (sequential decoding).")
+    ap.add_argument("--local-image", choices=["none", "copy", "sandbox"], default="none",
+                    help="Where containers run from: none = the .sif as given; copy = copy the "
+                         ".sif to $SLURM_TMPDIR at the start of each task; sandbox = unpack it "
+                         "there with 'singularity build --sandbox' (no squashfuse mounts). "
+                         "Applies to MPNN and relax tasks.")
     ap.add_argument("--no-mps", action="store_true",
                     help="Do not start CUDA MPS when --mpnn-workers > 1")
-    ap.add_argument("--relax-time", default="00:30:00")
+    ap.add_argument("--relax-time", default="08:00:00")
     ap.add_argument("--relax-mem", default=None, help="Default: max(8, 4 x relax-cpus) GB")
     ap.add_argument("--relax-cpus", type=int, default=1,
                     help="Parallel FastRelax worker processes per relax array task (also sets "
@@ -480,7 +543,7 @@ def main():
         "MPNN_TIME": args.mpnn_time, "MPNN_MEM": mpnn_mem, "MPNN_CPUS": mpnn_cpus,
         "MPNN_WORKERS": args.mpnn_workers, "USE_MPS": use_mps,
         "MPNN_TEMPS": " ".join(args.mpnn_temps.split()), "NUM_SEQ": args.num_seq_per_temp,
-        "MPNN_BATCH": args.mpnn_batch_size,
+        "MPNN_BATCH": args.mpnn_batch_size, "IMG_MODE": args.local_image,
         "RELAX_TIME": args.relax_time, "RELAX_MEM": relax_mem, "RELAX_CPUS": args.relax_cpus,
         "N_TASKS": n_tasks, "MAX_CONC": args.max_concurrent, "N_ROUNDS": args.n_rounds,
     }
