@@ -417,7 +417,7 @@ def main():
                          "divide --num-seq-per-temp. 1 = old behaviour (sequential decoding).")
     ap.add_argument("--no-mps", action="store_true",
                     help="Do not start CUDA MPS when --mpnn-workers > 1")
-    ap.add_argument("--relax-time", default="08:00:00")
+    ap.add_argument("--relax-time", default="01:00:00")
     ap.add_argument("--relax-mem", default=None, help="Default: max(8, 4 x relax-cpus) GB")
     ap.add_argument("--relax-cpus", type=int, default=1,
                     help="Parallel FastRelax worker processes per relax array task (also sets "
