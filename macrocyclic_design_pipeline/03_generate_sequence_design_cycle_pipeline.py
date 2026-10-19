@@ -21,7 +21,12 @@ only the MPNN step gets --nv.
 --mpnn-workers N runs N concurrent ProteinMPNN processes per MPNN array task on
 the one GPU (a single process uses only a small fraction of it). Each task's
 chunk is split across the workers (strided); with N > 1 CUDA MPS is started per
-task unless --no-mps is given.
+task unless --no-mps is given. Workers pull backbones from a dynamic queue (a worker
+that finishes immediately starts the next backbone of the chunk).
+
+Per backbone, ProteinMPNN is launched ONCE and samples the whole --mpnn-temps ladder
+(--num-seq-per-temp samples each, in batches of --mpnn-batch-size); the first sequence
+meeting the composition constraints (lowest temperature first) is kept.
 
 --relax-cpus N runs N concurrent FastRelax worker processes per relax array task
 (each takes a strided shard of the chunk's jobs list; one thread each).
@@ -66,6 +71,9 @@ OUT="__OUT__"
 LIST="${OUT}/backbones.list"
 CHUNK=__CHUNK__
 WORKERS=__MPNN_WORKERS__
+TEMPS="__MPNN_TEMPS__"
+NSEQ=__NUM_SEQ__
+BATCH=__MPNN_BATCH__
 USE_MPS=__USE_MPS__
 MPNN_SCRIPT="/opt/proteinmpnn/protein_mpnn_run.py"
 MPNN_WEIGHTS="/opt/proteinmpnn/vanilla_model_weights"
@@ -99,14 +107,19 @@ if [ "${USE_MPS}" -eq 1 ]; then
     fi
 fi
 
-# Handles ONE backbone: all MPNN attempts for the current round. Always returns 0;
-# a failed backbone is logged and skipped, as before.
+# Handles ONE backbone: a SINGLE ProteinMPNN call samples every temperature of the
+# ladder (TEMPS) in one process (one container/CUDA/model start instead of up to 8),
+# then the first sequence meeting the composition constraints is taken. The FASTA is
+# ordered by temperature, so "first valid" = lowest temperature that has a valid
+# sequence, exactly as the old sequential retry ladder did. Always returns 0; a failed
+# backbone is logged and skipped.
 process_backbone() {
     local IDX="$1"
     local PROGRESS="$2"
-    local STEM ORIG PREV CURRENT_PDB ROUND_DIR TEMP MAX_ATTEMPTS ATTEMPT SUCCESS BIAS_JSON
-    local FASTA_FILE MATCH_FOUND CLEAN_FASTA_CONTENT NATIVE_HEADER NATIVE_SEQ TOTAL_LINES
-    local l H_IDX S_IDX H_LINE S_LINE DESIGNED_SEQ SERINE_COUNT HAS_LINEAR_PS HAS_CYCLIC_PS
+    local STEM ORIG PREV CURRENT_PDB ROUND_DIR SUCCESS BIAS_JSON FASTA_FILE
+    local NATIVE_HEADER NATIVE_SEQ H_LINE S_LINE DESIGNED_SEQ S_ONLY SERINE_COUNT
+    local HAS_LINEAR_PS HAS_CYCLIC_PS l
+    local -a FA
 
     STEM=$(awk -F'\t' -v n="${IDX}" 'NR==n{print $1}' "${LIST}")
     ORIG=$(awk -F'\t' -v n="${IDX}" 'NR==n{print $2}' "${LIST}")
@@ -132,135 +145,112 @@ process_backbone() {
     echo "=========================================================================="
     echo "[Progress: ${PROGRESS}] Processing backbone: ${STEM}"
     echo "=========================================================================="
-    echo "[${STEM}] round ${ROUND}: ProteinMPNN Batch Constraint Solver"
+    echo "[${STEM}] round ${ROUND}: ProteinMPNN single call, temperatures: ${TEMPS}"
 
-    TEMP="0.0001"
-    MAX_ATTEMPTS=8
-    ATTEMPT=1
     SUCCESS=false
-
     BIAS_JSON="${ROUND_DIR}/bias_AA.json"
     echo '{"S": 0.8}' > "${BIAS_JSON}"
 
-    while [ "${ATTEMPT}" -le "${MAX_ATTEMPTS}" ]; do
-        if ! singularity exec --nv --pwd /tmp -B __BIND_PATH__ ${MPS_BIND} __SIF__ \
-            python3 "${MPNN_SCRIPT}" \
-            --pdb_path "${CURRENT_PDB}" \
-            --pdb_path_chains "A" \
-            --sampling_temp "${TEMP}" \
-            --backbone_noise "0" \
-            --omit_AAs "C" \
-            --bias_AA_jsonl "${BIAS_JSON}" \
-            --num_seq_per_target 20 \
-            --path_to_model_weights "${MPNN_WEIGHTS}" \
-            --out_folder "${ROUND_DIR}"; then
-            echo "[WARN] ${STEM}: ProteinMPNN failed on attempt ${ATTEMPT} in round ${ROUND}"
-            break
-        fi
-
-        # Locate the newly generated FASTA file
+    if ! singularity exec --nv --pwd /tmp -B __BIND_PATH__ ${MPS_BIND} __SIF__ \
+        python3 "${MPNN_SCRIPT}" \
+        --pdb_path "${CURRENT_PDB}" \
+        --pdb_path_chains "A" \
+        --sampling_temp "${TEMPS}" \
+        --backbone_noise "0" \
+        --omit_AAs "C" \
+        --bias_AA_jsonl "${BIAS_JSON}" \
+        --num_seq_per_target "${NSEQ}" \
+        --batch_size "${BATCH}" \
+        --path_to_model_weights "${MPNN_WEIGHTS}" \
+        --out_folder "${ROUND_DIR}"; then
+        echo "[WARN] ${STEM}: ProteinMPNN failed in round ${ROUND}"
+    else
         FASTA_FILE="${ROUND_DIR}/seqs/$(basename "${CURRENT_PDB}" .pdb).fa"
         if [ ! -f "${FASTA_FILE}" ]; then
             echo "[WARN] ${STEM}: Expected fasta output ${FASTA_FILE} missing."
-            break
-        fi
+        else
+            # Read the FASTA once. Records: [native header, native seq, (header, seq) x samples],
+            # samples ordered by temperature.
+            mapfile -t FA < "${FASTA_FILE}"
+            NATIVE_HEADER="${FA[0]}"
+            NATIVE_SEQ="${FA[1]}"
+            for (( l=2; l+1<${#FA[@]}; l+=2 )); do
+                H_LINE="${FA[l]}"
+                S_LINE="${FA[l+1]}"
 
-        MATCH_FOUND=false
-        CLEAN_FASTA_CONTENT=""
+                # Isolate Chain A sequence
+                DESIGNED_SEQ="${S_LINE%%/*}"
 
-        # Store native reference info (first 2 lines of ProteinMPNN output)
-        NATIVE_HEADER=$(awk 'NR==1' "${FASTA_FILE}")
-        NATIVE_SEQ=$(awk 'NR==2' "${FASTA_FILE}")
+                S_ONLY="${DESIGNED_SEQ//[^S]/}"
+                SERINE_COUNT=${#S_ONLY}
+                HAS_LINEAR_PS=false; [[ "${DESIGNED_SEQ}" == *"PS"* ]] && HAS_LINEAR_PS=true
+                HAS_CYCLIC_PS=false; [[ "${DESIGNED_SEQ}" == S* && "${DESIGNED_SEQ}" == *P ]] && HAS_CYCLIC_PS=true
 
-        TOTAL_LINES=$(wc -l < "${FASTA_FILE}")
-        for (( l=3; l<=${TOTAL_LINES}; l+=2 )); do
-            H_IDX=$l
-            S_IDX=$((l+1))
-
-            H_LINE=$(awk "NR==${H_IDX}" "${FASTA_FILE}")
-            S_LINE=$(awk "NR==${S_IDX}" "${FASTA_FILE}")
-
-            # Isolate Chain A sequence
-            DESIGNED_SEQ=$(echo "${S_LINE}" | cut -d'/' -f1)
-
-            SERINE_COUNT=$(echo "${DESIGNED_SEQ}" | tr -cd 'S' | wc -c)
-            HAS_LINEAR_PS=false; [[ "${DESIGNED_SEQ}" == *"PS"* ]] && HAS_LINEAR_PS=true
-            HAS_CYCLIC_PS=false; [[ "${DESIGNED_SEQ}" == S* && "${DESIGNED_SEQ}" == *P ]] && HAS_CYCLIC_PS=true
-
-            if [ "${SERINE_COUNT}" -eq 1 ] && [ "${HAS_LINEAR_PS}" = false ] && [ "${HAS_CYCLIC_PS}" = false ]; then
-                echo "  --> Found valid sequence in batch generation: ${DESIGNED_SEQ} at temp=${TEMP}"
-                # Reconstruct a clean, standard 1-sample FASTA file for PyRosetta worker compatibility
-                CLEAN_FASTA_CONTENT="${NATIVE_HEADER}\n${NATIVE_SEQ}\n${H_LINE}\n${S_LINE}"
-                MATCH_FOUND=true
-                break
+                if [ "${SERINE_COUNT}" -eq 1 ] && [ "${HAS_LINEAR_PS}" = false ] && [ "${HAS_CYCLIC_PS}" = false ]; then
+                    echo "  --> Found valid sequence: ${DESIGNED_SEQ} (${H_LINE%%,*}, record $(( (l - 2) / 2 + 1 )) of $(( (${#FA[@]} - 2) / 2 )))"
+                    # Reduce to a clean, standard 1-sample FASTA for the PyRosetta worker
+                    printf '%s\n%s\n%s\n%s\n' "${NATIVE_HEADER}" "${NATIVE_SEQ}" "${H_LINE}" "${S_LINE}" > "${FASTA_FILE}"
+                    SUCCESS=true
+                    break
+                fi
+            done
+            if [ "${SUCCESS}" = false ]; then
+                echo "[WARN] ${STEM}: none of the $(( (${#FA[@]} - 2) / 2 )) sampled sequences satisfied the constraints."
             fi
-        done
-
-        if [ "${MATCH_FOUND}" = true ]; then
-            # Overwrite the multi-sequence batch file with our pristine single constrained sequence
-            echo -e "${CLEAN_FASTA_CONTENT}" > "${FASTA_FILE}"
-            SUCCESS=true
-            break
-        else
-            echo "[WARN] ${STEM}: No sequence in the 20-sample batch satisfied your criteria at T=${TEMP}."
-            rm -rf "${ROUND_DIR}/seqs" "${ROUND_DIR}/scores"
         fi
-
-        # Increase temperature to spark sidechain distribution diversity on subsequent tries
-        if [ "${ATTEMPT}" -eq 1 ]; then
-            TEMP="0.02"
-        else
-            # Scale up gradually (floating-point math via awk)
-            TEMP=$(awk -v t="${TEMP}" 'BEGIN {print t + 0.02}')
-        fi
-        ATTEMPT=$(( ATTEMPT + 1 ))
-    done
+    fi
 
     rm -f "${BIAS_JSON}"
     if [ "${SUCCESS}" = false ]; then
-        echo "[ERROR] ${STEM}: Failed composition constraint of exactly 1 Serine after ${MAX_ATTEMPTS} attempts."
+        echo "[ERROR] ${STEM}: Failed composition constraint of exactly 1 Serine (temperatures ${TEMPS})."
         # Clean folder markers to allow manual or automated workflow re-triggers
         rm -rf "${ROUND_DIR}"
     fi
     return 0
 }
 
-# Worker W takes backbones START+W, START+W+WORKERS, ... (strided, so slow
-# backbones that need several attempts are spread evenly).
-worker_loop() {
-    local W="$1"
-    local K=0 IDX MY_TOTAL
-    MY_TOTAL=$(seq $(( START + W )) "${WORKERS}" "${END}" | wc -l)
-    for IDX in $(seq $(( START + W )) "${WORKERS}" "${END}"); do
-        K=$(( K + 1 ))
-        process_backbone "${IDX}" "w${W} ${K}/${MY_TOTAL}"
-    done
-    echo "worker ${W} finished ${K} backbone(s)"
-}
+# Dynamic work queue: keep WORKERS backbones in flight; as soon as one finishes the
+# next backbone of the chunk is started (no static striding, so a slow backbone no
+# longer leaves the other workers idle). Needs bash >= 4.3 (wait -n).
+TOTAL_B=$(( END - START + 1 ))
+FAIL=0
 
 if [ "${WORKERS}" -eq 1 ]; then
-    worker_loop 0
+    K=0
+    for IDX in $(seq "${START}" "${END}"); do
+        K=$(( K + 1 ))
+        process_backbone "${IDX}" "${K}/${TOTAL_B}"
+    done
 else
-    # Each worker logs to its own file (live progress: tail -f); the files are
-    # appended to this log, in worker order, when all workers are done.
-    PIDS=""
-    for W in $(seq 0 $(( WORKERS - 1 ))); do
-        WLOG="${OUT}/logs/mpnn_r${ROUND}_task${SLURM_ARRAY_TASK_ID}_w${W}.log"
-        worker_loop "${W}" > "${WLOG}" 2>&1 &
-        PIDS="${PIDS} $!"
+    if [ "${BASH_VERSINFO[0]}" -lt 4 ] || { [ "${BASH_VERSINFO[0]}" -eq 4 ] && [ "${BASH_VERSINFO[1]}" -lt 3 ]; }; then
+        echo "[ERROR] bash >= 4.3 is required for the dynamic queue (have ${BASH_VERSION})"
+        exit 1
+    fi
+    # One log file per backbone (live progress: tail -f); appended to this log in
+    # backbone order when the task is done.
+    BLOG_PREFIX="${OUT}/logs/mpnn_r${ROUND}_task${SLURM_ARRAY_TASK_ID}_b"
+    echo "dynamic queue: ${TOTAL_B} backbone(s), ${WORKERS} in flight; live logs: ${BLOG_PREFIX}*.log"
+    RUNNING=0
+    K=0
+    for IDX in $(seq "${START}" "${END}"); do
+        K=$(( K + 1 ))
+        while [ "${RUNNING}" -ge "${WORKERS}" ]; do
+            wait -n || FAIL=1
+            RUNNING=$(( RUNNING - 1 ))
+        done
+        process_backbone "${IDX}" "${K}/${TOTAL_B}" > "${BLOG_PREFIX}${IDX}.log" 2>&1 &
+        RUNNING=$(( RUNNING + 1 ))
     done
-    echo "launched ${WORKERS} workers; live logs: ${OUT}/logs/mpnn_r${ROUND}_task${SLURM_ARRAY_TASK_ID}_w*.log"
-    FAIL=0
-    for P in ${PIDS}; do
-        wait "${P}" || FAIL=1
+    while [ "${RUNNING}" -gt 0 ]; do
+        wait -n || FAIL=1
+        RUNNING=$(( RUNNING - 1 ))
     done
-    for W in $(seq 0 $(( WORKERS - 1 ))); do
-        WLOG="${OUT}/logs/mpnn_r${ROUND}_task${SLURM_ARRAY_TASK_ID}_w${W}.log"
-        echo "------ worker ${W} ------"
-        cat "${WLOG}" && rm -f "${WLOG}"
+    for IDX in $(seq "${START}" "${END}"); do
+        echo "------ backbone index ${IDX} ------"
+        cat "${BLOG_PREFIX}${IDX}.log" && rm -f "${BLOG_PREFIX}${IDX}.log"
     done
     if [ "${FAIL}" -ne 0 ]; then
-        echo "[ERROR] at least one worker process crashed"
+        echo "[ERROR] at least one backbone process crashed"
     fi
 fi
 
@@ -416,6 +406,15 @@ def main():
     ap.add_argument("--mpnn-workers", type=int, default=1,
                     help="Concurrent ProteinMPNN processes sharing the GPU inside each MPNN "
                          "array task (default 1 = previous behavior)")
+    ap.add_argument("--mpnn-temps", default="0.0001 0.02 0.04 0.06 0.08 0.10 0.12 0.14",
+                    help="Space-separated sampling temperatures, all sampled in ONE ProteinMPNN "
+                         "call; lowest temperature with a valid sequence wins (default = the old "
+                         "retry ladder)")
+    ap.add_argument("--num-seq-per-temp", type=int, default=20,
+                    help="Sequences sampled per temperature (default 20, as before per attempt)")
+    ap.add_argument("--mpnn-batch-size", type=int, default=20,
+                    help="ProteinMPNN --batch_size: samples decoded in parallel on the GPU. Must "
+                         "divide --num-seq-per-temp. 1 = old behaviour (sequential decoding).")
     ap.add_argument("--no-mps", action="store_true",
                     help="Do not start CUDA MPS when --mpnn-workers > 1")
     ap.add_argument("--relax-time", default="08:00:00")
@@ -428,6 +427,14 @@ def main():
 
     if args.mpnn_workers < 1:
         sys.exit("--mpnn-workers must be >= 1")
+    try:
+        temps = [float(t) for t in args.mpnn_temps.split()]
+    except ValueError:
+        sys.exit("--mpnn-temps must be space-separated numbers")
+    if not temps:
+        sys.exit("--mpnn-temps is empty")
+    if args.mpnn_batch_size < 1 or args.num_seq_per_temp % args.mpnn_batch_size:
+        sys.exit("--mpnn-batch-size must be >= 1 and divide --num-seq-per-temp")
     mpnn_cpus = args.mpnn_cpus or max(2, args.mpnn_workers)
     mpnn_mem = args.mpnn_mem or f"{max(16, 4 * args.mpnn_workers)}G"
     if args.relax_cpus < 1:
@@ -472,6 +479,8 @@ def main():
         "GPU_QUEUE": args.queue, "CPU_QUEUE": args.cpu_queue or args.queue,
         "MPNN_TIME": args.mpnn_time, "MPNN_MEM": mpnn_mem, "MPNN_CPUS": mpnn_cpus,
         "MPNN_WORKERS": args.mpnn_workers, "USE_MPS": use_mps,
+        "MPNN_TEMPS": " ".join(args.mpnn_temps.split()), "NUM_SEQ": args.num_seq_per_temp,
+        "MPNN_BATCH": args.mpnn_batch_size,
         "RELAX_TIME": args.relax_time, "RELAX_MEM": relax_mem, "RELAX_CPUS": args.relax_cpus,
         "N_TASKS": n_tasks, "MAX_CONC": args.max_concurrent, "N_ROUNDS": args.n_rounds,
     }
@@ -485,6 +494,8 @@ def main():
     print(" SLURM job chain generated")
     print("=" * 78)
     print(f"Backbones: {len(pdbs)}  |  chunk size: {args.chunk_size}  |  array tasks/array: {n_tasks}")
+    print(f"MPNN: one call/backbone, {len(temps)} temperature(s) x {args.num_seq_per_temp} "
+          f"samples (batch {args.mpnn_batch_size})")
     print(f"Relax workers per task: {args.relax_cpus} (mem {relax_mem})")
     print(f"Rounds: {args.n_rounds}  ->  {2 * args.n_rounds} arrays (MPNN on {args.queue}, "
           f"relax on {args.cpu_queue or args.queue})")

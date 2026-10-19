@@ -35,7 +35,7 @@ docs/changelog periodically — this is a fast-moving codebase.
 | 1 | `scripts/01_build_rfpeptides_runs.py` | TSV → per-target `run_inference.py` shell scripts (RFpeptides flags) |
 | 2 | `scripts/02_run_rfpeptides.sh` | Runs those scripts, producing cyclic macrocycle backbones |
 | 2b | `scripts/02b_normalize_chains.py` | **Required.** Relabels chains so macrocycle=A, target=B (see caveat below) |
-| 3 | `scripts/03_sequence_design_cycle.py` | 4x [ProteinMPNN → PyRosetta FastRelax + `PeptideCyclizeMover`] |
+| 3 | `scripts/03_generate_sequence_design_cycle_pipeline.py` | 4x [ProteinMPNN → PyRosetta FastRelax + `PeptideCyclizeMover`] |
 | 4 | `scripts/04_afcycdesign_filter.py` | AfCycDesign re-prediction; filter on normalized iPAE / Ca RMSD |
 | 5 | `scripts/05_rosetta_filter.py` | Rosetta ddG / SAP / contact molecular surface filter |
 
@@ -146,11 +146,12 @@ round, dependency-linked) rather than running locally — see the script's
 own docstring for the full option list.
 
 ```bash
-python scripts/03_sequence_design_cycle.py \
-    --backbones-dir rfpeptides_runs_normalized/MCL1_campaign \
-    --out-dir mpnn_outputs/MCL1_campaign \
-    --sif /path/to/combined_proteinmpnn_pyrosetta.sif \
-    --n-rounds 4
+python /macrocyclic_design_pipeline//03_generate_sequence_design_cycle_pipeline.py \
+  --backbones-dir  /net/nfs-bio/fast2/def-rodrigu1/20260916_peptide_macrocyclic/02_rfpeptides_runs_normalized/dnaJ \
+  --out-dir /net/nfs-bio/fast2/def-rodrigu1/20260916_peptide_macrocyclic/03_mpnn_outputs/dnaJ \
+  --sif /home/jflucier/programs/Rodrigue_Lab/macrocyclic_design_pipeline/containers/proteinmpnn.sif \
+  --n-rounds 4  --max-backbones 40 --mpnn-workers 12 --chunk-size 40 --relax-cpus 40
+
 
 bash mpnn_outputs/MCL1_campaign/submit_all.sh
 ```
