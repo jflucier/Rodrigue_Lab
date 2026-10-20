@@ -236,7 +236,7 @@ def main():
     ap.add_argument("--max-backbones", type=int, default=None, help="Cap to first N list entries")
     ap.add_argument("--queue", default="gh-bio")
     ap.add_argument("--bind-path", default="/net/nfs-bio")
-    ap.add_argument("--chunk-size", type=int, default=20)
+    ap.add_argument("--chunk-size", type=int, default=500)
     ap.add_argument("--max-concurrent", type=int, default=50,
                     help="Concurrent array tasks PER ROUND (all rounds are submitted together)")
     ap.add_argument("--submit", action="store_true")
@@ -248,7 +248,7 @@ def main():
     ap.add_argument("--binder-chain", default="A")
     ap.add_argument("--target-chain", default="B")
 
-    ap.add_argument("--afcyc-time", default="12:00:00")
+    ap.add_argument("--afcyc-time", default="00:20:00")
     ap.add_argument("--afcyc-mem", default=None, help="Default: max(32, 8 x workers) GB")
     ap.add_argument("--afcyc-cpus", type=int, default=None, help="Default: max(4, workers + 2)")
     ap.add_argument("--afcyc-workers", type=int, default=1,
