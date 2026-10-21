@@ -370,7 +370,8 @@ def main():
             script_text = SLURM_TEMPLATE.format(
                 design_name=name,
                 account=args.account,
-                time=args.time, cpus=cpus, mem=mem, workers=args.workers,
+                time=args.time, cpus=cpus, mem=mem,
+                workers=args.workers,
                 container_sif=args.container_sif,
                 abs_in_dir=str(pdb_path.parent),
                 abs_out_dir=str(out_dir),
