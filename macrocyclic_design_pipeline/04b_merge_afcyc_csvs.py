@@ -10,7 +10,7 @@ Duplicates: files are read oldest-first by modification time (rows within a
 file in order), so the most recently written row wins.
 
 Usage:
-    python 04b_merge_afcyc_csvs.py <out-dir> --round 4 --expected-tasks 120
+    python 04b_merge_afcyc_csvs.py <out-dir> --round 4
 
 Feed the resulting file to 04c_derive_target_cutoff.py.
 """
@@ -29,8 +29,6 @@ def main():
     ap.add_argument("--round", type=int, required=True)
     ap.add_argument("--out-csv", default=None,
                     help="Default: <out_dir>/afcyc_filter_summary_r<round>.csv")
-    ap.add_argument("--expected-tasks", type=int, default=None,
-                    help="Array tasks per round; reports missing task files")
     args = ap.parse_args()
 
     out_dir = Path(args.out_dir)
