@@ -50,6 +50,7 @@ SLURM_TEMPLATE = """#!/bin/bash
 {cluster_specific_headers}#SBATCH --output={abs_out_dir}/{design_name}/logs/slurm-%A_%a.out
 
 set -euo pipefail
+export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
 
 # Calculate chunk slices based on the Slurm Array Task ID
 DESIGNS_PER_TASK={designs_per_task}
