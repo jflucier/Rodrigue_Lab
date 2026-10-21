@@ -80,7 +80,7 @@ PIDS=""
 
 # One CPU thread per worker process: many concurrent torch processes with default
 # thread pools oversubscribe the node.
-if [ "${WORKERS}" -gt 1 ]; then
+if [ "${{WORKERS}}" -gt 1 ]; then
     export OMP_NUM_THREADS=1
     export MKL_NUM_THREADS=1
 fi
