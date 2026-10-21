@@ -46,6 +46,7 @@ SLURM_TEMPLATE = """#!/bin/bash
 #SBATCH --cpus-per-task={cpus}
 #SBATCH --mem={mem}
 #SBATCH --array={array_range_str}
+#SBATCH --requeue
 {cluster_specific_headers}#SBATCH --output={abs_out_dir}/{design_name}/logs/slurm-%A_%a.out
 
 set -euo pipefail
