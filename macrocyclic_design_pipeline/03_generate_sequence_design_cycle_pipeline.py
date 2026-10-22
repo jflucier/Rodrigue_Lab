@@ -299,6 +299,7 @@ RELAX_TEMPLATE = r"""#!/bin/bash
 #SBATCH --cpus-per-task=__RELAX_CPUS__
 #SBATCH --mem=__RELAX_MEM__
 #SBATCH --time=__RELAX_TIME__
+#SBATCH --requeue
 
 # Expects ROUND in the environment (set by submit_all.sh via --export).
 set -uo pipefail
