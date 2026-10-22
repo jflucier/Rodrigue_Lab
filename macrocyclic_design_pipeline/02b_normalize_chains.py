@@ -95,7 +95,6 @@ def main():
         sys.exit(f"No .pdb files found under {in_dir}")
 
     n_ok, n_skipped = 0, 0
-    total_files = len(pdbs)
     for i, pdb in enumerate(pdbs, start=1):
         f = pdb_io.PDBFile.read(str(pdb))
         structure = pdb_io.get_structure(f, model=1)
@@ -112,8 +111,6 @@ def main():
         print(f"[OK]   {pdb.name}: {note}")
         n_ok += 1
 
-        if i % 5000 == 0:
-            print(f"--- Processed {i} / {total_files} files... ---")
 
     print(f"\n{n_ok} normalized, {n_skipped} skipped -> {out_dir}")
     if n_skipped:
