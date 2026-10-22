@@ -459,7 +459,7 @@ def main():
                     help="Backbones handled per array task (default 20)")
     ap.add_argument("--max-concurrent", type=int, default=50,
                     help="Max simultaneously running array tasks per array (default 50)")
-    ap.add_argument("--mpnn-time", default="01:00:00")
+    ap.add_argument("--mpnn-time", default="00:30:00")
     ap.add_argument("--mpnn-mem", default=None, help="Default: max(16, 4 x workers) GB")
     ap.add_argument("--mpnn-cpus", type=int, default=None, help="Default: max(2, workers)")
     ap.add_argument("--mpnn-workers", type=int, default=1,
