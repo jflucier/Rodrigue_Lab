@@ -13,6 +13,10 @@ relaxed input complexes and computes, per predicted model:
                   residues near the binder (CA within --interface-cutoff A of
                   any binder CA in the input). Robust to the target flexing or
                   being refolded away from the interface.
+  iface_recall    fraction of the DESIGNED interface (target residues near the binder
+                  in the input) still contacted by the predicted binder (prediction
+                  fitted on the target). ~1 = right site; ~0 = binder predicted elsewhere.
+  iface_jaccard   same overlap as intersection/union (also penalises extra contacts)
   complex_aligned Ca RMSD of target+binder after superposing on ALL Ca atoms
                   (what `align` + `rmsd` on the whole complex gives in ChimeraX)
   complex_raw     Ca RMSD of target+binder with NO superposition
@@ -104,12 +108,16 @@ def interface_idx(in_b, in_t, cutoff):
     return idx
 
 
-def model_metrics(pred_b, pred_t, in_b, in_t, iface):
+def model_metrics(pred_b, pred_t, in_b, in_t, iface, contact_cutoff=8.0, in_contact=None):
     both_p, both_i = np.vstack([pred_t, pred_b]), np.vstack([in_t, in_b])
     f_t = fit(pred_t, in_t)
     f_i = fit(pred_t[iface], in_t[iface])
     f_all = fit(both_p, both_i)
+    d_pred = np.sqrt(((in_t[:, None, :] - f_t(pred_b)[None, :, :]) ** 2).sum(-1)).min(1)
+    pi, di = set(np.where(d_pred < contact_cutoff)[0].tolist()), set(in_contact.tolist())
     return {
+        "iface_recall": len(pi & di) / max(len(di), 1),
+        "iface_jaccard": len(pi & di) / max(len(pi | di), 1),
         "bind_tgtalign": rmsd(f_t(pred_b), in_b),
         "bind_ifacealign": rmsd(f_i(pred_b), in_b),
         "iface_fit_rmsd": rmsd(f_i(pred_t[iface]), in_t[iface]),
@@ -129,7 +137,7 @@ def design_paths(design, relax_out, pred_dir):
             Path(pred_dir) / f"{design}_prediction.pdb")
 
 
-def analyse(design, relax_out, pred_dir, binder_chain, target_chain, iface_cutoff=10.0):
+def analyse(design, relax_out, pred_dir, binder_chain, target_chain, iface_cutoff=10.0, contact_cutoff=8.0):
     in_path, pr_path = design_paths(design, relax_out, pred_dir)
     if not in_path.is_file():
         raise FileNotFoundError(in_path)
@@ -141,13 +149,15 @@ def analyse(design, relax_out, pred_dir, binder_chain, target_chain, iface_cutof
         raise ValueError("no CA atoms parsed")
     in_b, in_t = split_binder_target(in_models[0], binder_chain, target_chain)
     iface = interface_idx(in_b, in_t, iface_cutoff)
+    d_in = np.sqrt(((in_t[:, None, :] - in_b[None, :, :]) ** 2).sum(-1)).min(1)
+    in_contact = np.where(d_in < contact_cutoff)[0]
     per_model = []
     for m in pr_models:
         pb, pt = split_binder_target(m)
         if len(pb) != len(in_b) or len(pt) != len(in_t):
             raise ValueError(f"CA counts differ: prediction binder/target {len(pb)}/{len(pt)}, "
                              f"input {len(in_b)}/{len(in_t)}")
-        per_model.append(model_metrics(pb, pt, in_b, in_t, iface))
+        per_model.append(model_metrics(pb, pt, in_b, in_t, iface, contact_cutoff, in_contact))
     return per_model, iface
 
 
@@ -171,6 +181,9 @@ def main():
     ap.add_argument("--interface-cutoff", type=float, default=10.0,
                     help="target CA within this distance (A) of a binder CA define the interface "
                          "used for the interface-aligned binder RMSD")
+    ap.add_argument("--contact-cutoff", type=float, default=8.0,
+                    help="CA-CA distance (A) defining a target residue as contacted by the binder, "
+                         "used for the site-recovery metric (iface_recall / iface_jaccard)")
     ap.add_argument("--ipae-cutoff", type=float, default=0.30)
     ap.add_argument("--rmsd-cutoff", type=float, default=1.5)
     ap.add_argument("--max", type=int, default=None, help="only analyse the first N designs")
@@ -195,7 +208,7 @@ def main():
     for k, name in enumerate(names, 1):
         try:
             pm, iface = analyse(name, args.relax_out, args.predictions_dir, args.binder_chain,
-                                args.target_chain, args.interface_cutoff)
+                                args.target_chain, args.interface_cutoff, args.contact_cutoff)
         except Exception as e:  # keep going; report at the end
             n_fail += 1
             if n_fail <= 5:
@@ -206,7 +219,8 @@ def main():
              "rmsd_colabdesign": fnum(r.get("rmsd")), "ipae": fnum(r.get("ipae")),
              "plddt": fnum(r.get("plddt"))}
         o["n_iface"] = len(iface)
-        for key in ("bind_tgtalign", "bind_ifacealign", "iface_fit_rmsd", "complex_aligned",
+        for key in ("bind_tgtalign", "bind_ifacealign", "iface_fit_rmsd", "iface_recall", "iface_jaccard",
+                    "complex_aligned",
                     "complex_raw", "target_after_tgtfit"):
             vals = [m[key] for m in pm]
             o[f"{key}_mean"] = float(np.mean(vals))
@@ -220,6 +234,7 @@ def main():
                 print(f"  model {i + 1}: binder after target fit {m['bind_tgtalign']:.3f} | "
                       f"binder after interface fit {m['bind_ifacealign']:.3f} "
                       f"(interface fit {m['iface_fit_rmsd']:.2f}) | "
+                      f"designed-interface recall {m['iface_recall']:.2f} | "
                       f"complex aligned {m['complex_aligned']:.3f} | complex raw {m['complex_raw']:.3f} | "
                       f"target after target fit {m['target_after_tgtfit']:.3f}")
             dev = pm[0]["_tdev"]
@@ -277,11 +292,21 @@ def main():
     for cut in (0.3, 0.4, 0.5):
         counts = [int(((ipa < cut) & (bi < r)).sum()) for r in (1.5, 2, 3, 4)]
         print(f"  iPAE<{cut}: designs with interface-aligned RMSD <1.5,2,3,4 A = {counts}")
+    rc = np.array([o["iface_recall_mean"] for o in out_rows])
+    print(f"\nSite recovery (fraction of the designed interface still contacted, {args.contact_cutoff} A CA cutoff):")
+    print(f"  all designs, percentiles 5/50/95: {q(rc)}")
+    for lo, hi, label in ((0.0, 0.1, "< 0.1  (binder predicted elsewhere)"),
+                          (0.1, 0.5, "0.1-0.5 (partial overlap)"),
+                          (0.5, 1.01, ">= 0.5  (same site)")):
+        sel = (rc >= lo) & (rc < hi)
+        print(f"  recall {label:36s}: {int(sel.sum()):6d} designs"
+              f"  | of those iPAE<0.4: {int((sel & (ipa < 0.4)).sum())}"
+              f"  | RMSD<4 A: {int((sel & (bi < 4)).sum())}")
     print("\n10 lowest-iPAE designs:")
-    print(f"  {'design':36s} {'ipae':>6s} {'colab':>7s} {'bind_tgtalign':>14s} {'per model':>14s}")
+    print(f"  {'design':36s} {'ipae':>6s} {'colab':>7s} {'bind_tgtalign':>14s} {'per model':>14s} {'recall':>7s}")
     for o in sorted(out_rows, key=lambda o: o["ipae"])[:10]:
         print(f"  {o['design']:36s} {o['ipae']:6.3f} {o['rmsd_colabdesign']:7.2f} "
-              f"{o['bind_tgtalign_mean']:14.2f} {o['bind_tgtalign_per_model']:>14s}")
+              f"{o['bind_tgtalign_mean']:14.2f} {o['bind_tgtalign_per_model']:>14s} {o['iface_recall_mean']:7.2f}")
 
 
 if __name__ == "__main__":
