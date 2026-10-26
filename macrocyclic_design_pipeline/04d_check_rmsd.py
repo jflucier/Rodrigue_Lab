@@ -9,6 +9,10 @@ relaxed input complexes and computes, per predicted model:
   bind_tgtalign   Ca RMSD of the BINDER after superposing the prediction on the
                   input using the TARGET Ca atoms only (the usual "peptide RMSD
                   aligned on the target"; this is what a binder RMSD should be)
+  bind_ifacealign Ca RMSD of the BINDER after superposing on only the target
+                  residues near the binder (CA within --interface-cutoff A of
+                  any binder CA in the input). Robust to the target flexing or
+                  being refolded away from the interface.
   complex_aligned Ca RMSD of target+binder after superposing on ALL Ca atoms
                   (what `align` + `rmsd` on the whole complex gives in ChimeraX)
   complex_raw     Ca RMSD of target+binder with NO superposition
@@ -91,12 +95,25 @@ def rmsd(A, B):
     return float(np.sqrt(((A - B) ** 2).sum(1).mean()))
 
 
-def model_metrics(pred_b, pred_t, in_b, in_t):
+def interface_idx(in_b, in_t, cutoff):
+    """Indices of target CA atoms within `cutoff` A of any binder CA (at least 6 nearest)."""
+    d = np.sqrt(((in_t[:, None, :] - in_b[None, :, :]) ** 2).sum(-1)).min(1)
+    idx = np.where(d < cutoff)[0]
+    if len(idx) < 6:
+        idx = np.argsort(d)[: min(6, len(d))]
+    return idx
+
+
+def model_metrics(pred_b, pred_t, in_b, in_t, iface):
     both_p, both_i = np.vstack([pred_t, pred_b]), np.vstack([in_t, in_b])
     f_t = fit(pred_t, in_t)
+    f_i = fit(pred_t[iface], in_t[iface])
     f_all = fit(both_p, both_i)
     return {
         "bind_tgtalign": rmsd(f_t(pred_b), in_b),
+        "bind_ifacealign": rmsd(f_i(pred_b), in_b),
+        "iface_fit_rmsd": rmsd(f_i(pred_t[iface]), in_t[iface]),
+        "_tdev": np.linalg.norm(f_t(pred_t) - in_t, axis=1),
         "target_after_tgtfit": rmsd(f_t(pred_t), in_t),
         "complex_aligned": rmsd(f_all(both_p), both_i),
         "complex_raw": rmsd(both_p, both_i),
@@ -112,7 +129,7 @@ def design_paths(design, relax_out, pred_dir):
             Path(pred_dir) / f"{design}_prediction.pdb")
 
 
-def analyse(design, relax_out, pred_dir, binder_chain, target_chain):
+def analyse(design, relax_out, pred_dir, binder_chain, target_chain, iface_cutoff=10.0):
     in_path, pr_path = design_paths(design, relax_out, pred_dir)
     if not in_path.is_file():
         raise FileNotFoundError(in_path)
@@ -123,14 +140,15 @@ def analyse(design, relax_out, pred_dir, binder_chain, target_chain):
     if not in_models or not pr_models:
         raise ValueError("no CA atoms parsed")
     in_b, in_t = split_binder_target(in_models[0], binder_chain, target_chain)
+    iface = interface_idx(in_b, in_t, iface_cutoff)
     per_model = []
     for m in pr_models:
         pb, pt = split_binder_target(m)
         if len(pb) != len(in_b) or len(pt) != len(in_t):
             raise ValueError(f"CA counts differ: prediction binder/target {len(pb)}/{len(pt)}, "
                              f"input {len(in_b)}/{len(in_t)}")
-        per_model.append(model_metrics(pb, pt, in_b, in_t))
-    return per_model
+        per_model.append(model_metrics(pb, pt, in_b, in_t, iface))
+    return per_model, iface
 
 
 # ------------------------------------------------------------------------ main
@@ -150,6 +168,9 @@ def main():
     ap.add_argument("--relax-out", required=True, help="03 output dir (holds <backbone>/round<N>/*.pdb)")
     ap.add_argument("--binder-chain", default="A")
     ap.add_argument("--target-chain", default="B")
+    ap.add_argument("--interface-cutoff", type=float, default=10.0,
+                    help="target CA within this distance (A) of a binder CA define the interface "
+                         "used for the interface-aligned binder RMSD")
     ap.add_argument("--ipae-cutoff", type=float, default=0.30)
     ap.add_argument("--rmsd-cutoff", type=float, default=1.5)
     ap.add_argument("--max", type=int, default=None, help="only analyse the first N designs")
@@ -173,7 +194,8 @@ def main():
     out_rows, n_fail = [], 0
     for k, name in enumerate(names, 1):
         try:
-            pm = analyse(name, args.relax_out, args.predictions_dir, args.binder_chain, args.target_chain)
+            pm, iface = analyse(name, args.relax_out, args.predictions_dir, args.binder_chain,
+                                args.target_chain, args.interface_cutoff)
         except Exception as e:  # keep going; report at the end
             n_fail += 1
             if n_fail <= 5:
@@ -183,18 +205,30 @@ def main():
         o = {"design": name, "n_models": len(pm),
              "rmsd_colabdesign": fnum(r.get("rmsd")), "ipae": fnum(r.get("ipae")),
              "plddt": fnum(r.get("plddt"))}
-        for key in ("bind_tgtalign", "complex_aligned", "complex_raw", "target_after_tgtfit"):
+        o["n_iface"] = len(iface)
+        for key in ("bind_tgtalign", "bind_ifacealign", "iface_fit_rmsd", "complex_aligned",
+                    "complex_raw", "target_after_tgtfit"):
             vals = [m[key] for m in pm]
             o[f"{key}_mean"] = float(np.mean(vals))
             o[f"{key}_per_model"] = ";".join(f"{v:.3f}" for v in vals)
         o["bind_tgtalign_min"] = float(min(m["bind_tgtalign"] for m in pm))
+        o["bind_ifacealign_min"] = float(min(m["bind_ifacealign"] for m in pm))
         out_rows.append(o)
         if args.design:
             print(f"\n{name}: ColabDesign rmsd={o['rmsd_colabdesign']}  ipae={o['ipae']}")
             for i, m in enumerate(pm):
                 print(f"  model {i + 1}: binder after target fit {m['bind_tgtalign']:.3f} | "
+                      f"binder after interface fit {m['bind_ifacealign']:.3f} "
+                      f"(interface fit {m['iface_fit_rmsd']:.2f}) | "
                       f"complex aligned {m['complex_aligned']:.3f} | complex raw {m['complex_raw']:.3f} | "
                       f"target after target fit {m['target_after_tgtfit']:.3f}")
+            dev = pm[0]["_tdev"]
+            far = [(i + 1, round(float(x), 1)) for i, x in enumerate(dev) if x > 3.0]
+            print(f"  interface target residues (1-based, {len(iface)}): {[int(i) + 1 for i in iface]}")
+            print(f"  target CA deviation after target fit, model 1: median {np.median(dev):.2f} A, "
+                  f"max {dev.max():.2f} A")
+            print(f"  residues deviating > 3 A (index, A): {far if far else 'none'}")
+            print("  per-residue deviation (A): " + " ".join(f"{x:.1f}" for x in dev))
         elif k % 500 == 0:
             print(f"  {k}/{len(names)}")
     if n_fail:
@@ -229,6 +263,20 @@ def main():
     print(f"  ... and binder RMSD after target fit (mean)     : {int(((ip < args.ipae_cutoff) & (bt < args.rmsd_cutoff)).sum())}")
     print(f"  ... and binder RMSD after target fit (best model): {int(((ip < args.ipae_cutoff) & (bm < args.rmsd_cutoff)).sum())}")
     print(f"  lowest binder RMSD after target fit (mean/best) : {np.nanmin(bt):.2f} / {np.nanmin(bm):.2f} A")
+    bi = np.array([o["bind_ifacealign_mean"] for o in out_rows])
+    tf = np.array([o["target_after_tgtfit_mean"] for o in out_rows])
+    itf = np.array([o["iface_fit_rmsd_mean"] for o in out_rows])
+    q = lambda x: " / ".join(f"{v:.2f}" for v in np.nanpercentile(x, [5, 50, 95]))
+    print(f"\nTarget self-consistency (5/50/95 percentile, A): whole target after fit {q(tf)}; "
+          f"interface residues after interface fit {q(itf)}")
+    print(f"\nInterface-aligned binder RMSD (fit on target residues within {args.interface_cutoff} A of the binder):")
+    print(f"  percentiles 0/5/50 of binder RMSD: {np.nanmin(bi):.2f} / {np.nanpercentile(bi, 5):.2f} / "
+          f"{np.nanmedian(bi):.2f} A (target-fit version: {np.nanmin(bt):.2f} / "
+          f"{np.nanpercentile(bt, 5):.2f} / {np.nanmedian(bt):.2f} A)")
+    ipa = np.array([o["ipae"] for o in out_rows])
+    for cut in (0.3, 0.4, 0.5):
+        counts = [int(((ipa < cut) & (bi < r)).sum()) for r in (1.5, 2, 3, 4)]
+        print(f"  iPAE<{cut}: designs with interface-aligned RMSD <1.5,2,3,4 A = {counts}")
     print("\n10 lowest-iPAE designs:")
     print(f"  {'design':36s} {'ipae':>6s} {'colab':>7s} {'bind_tgtalign':>14s} {'per model':>14s}")
     for o in sorted(out_rows, key=lambda o: o["ipae"])[:10]:
