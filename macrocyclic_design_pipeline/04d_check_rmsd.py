@@ -17,6 +17,9 @@ relaxed input complexes and computes, per predicted model:
                   in the input) still contacted by the predicted binder (prediction
                   fitted on the target). ~1 = right site; ~0 = binder predicted elsewhere.
   iface_jaccard   same overlap as intersection/union (also penalises extra contacts)
+  --hotspots 24,25,32,33,34  adds hot_design / hot_pred: fraction of those target residues
+                  (numbered as in the relaxed input PDB) in the designed interface /
+                  contacted by the predicted binder (--contact-cutoff).
   (full run) also writes --contact-out: for every target residue, how often it is in the
                   DESIGNED interface vs how often the PREDICTED binder contacts it
                   (all designs, and designs with iPAE < --ipae-cutoff-hist), to show
@@ -204,6 +207,8 @@ def main():
     ap.add_argument("--contact-cutoff", type=float, default=8.0,
                     help="CA-CA distance (A) defining a target residue as contacted by the binder, "
                          "used for the site-recovery metric (iface_recall / iface_jaccard)")
+    ap.add_argument("--hotspots", default=None,
+                    help="comma-separated target residue numbers used as hotspots, e.g. 24,25,32,33,34")
     ap.add_argument("--contact-out", default="target_contact_frequency.csv")
     ap.add_argument("--ipae-cutoff-hist", type=float, default=0.40,
                     help="iPAE cutoff for the 'confident' column of --contact-out")
@@ -231,6 +236,7 @@ def main():
     des_cnt = pred_cnt = pred_cnt_conf = None
     n_hist = n_hist_conf = 0
     resids = None
+    hidx = None
     for k, name in enumerate(names, 1):
         try:
             pm, iface, in_contact, in_path = analyse(name, args.relax_out, args.predictions_dir, args.binder_chain,
@@ -246,6 +252,12 @@ def main():
             if des_cnt is None:
                 des_cnt, pred_cnt, pred_cnt_conf = np.zeros(n_t), np.zeros(n_t), np.zeros(n_t)
                 resids = target_resids(in_path, args.binder_chain, args.target_chain, n_t)
+                if args.hotspots:
+                    want = {h.strip() for h in args.hotspots.split(",") if h.strip()}
+                    hidx = np.array([i for i, r_ in enumerate(resids) if r_ in want], dtype=int)
+                    found = [resids[i] for i in hidx]
+                    print(f"[*] hotspots found in the target numbering: {found}"
+                          + (f"  (not found: {sorted(want - set(found))})" if len(found) < len(want) else ""))
             if n_t == len(des_cnt):
                 dv = np.zeros(n_t)
                 dv[in_contact] = 1.0
@@ -260,6 +272,9 @@ def main():
              "rmsd_colabdesign": fnum(r.get("rmsd")), "ipae": fnum(r.get("ipae")),
              "plddt": fnum(r.get("plddt"))}
         o["n_iface"] = len(iface)
+        if hidx is not None and len(hidx) and not args.design and len(pm[0]["_pred_contact"]) == len(des_cnt):
+            o["hot_design"] = float(np.isin(hidx, in_contact).mean())
+            o["hot_pred"] = float(np.mean([m["_pred_contact"][hidx].mean() for m in pm]))
         for key in ("bind_tgtalign", "bind_ifacealign", "iface_fit_rmsd", "iface_recall", "iface_jaccard",
                     "complex_aligned",
                     "complex_raw", "target_after_tgtfit"):
@@ -343,6 +358,17 @@ def main():
         print(f"  recall {label:36s}: {int(sel.sum()):6d} designs"
               f"  | of those iPAE<0.4: {int((sel & (ipa < 0.4)).sum())}"
               f"  | RMSD<4 A: {int((sel & (bi < 4)).sum())}")
+    if hidx is not None and len(hidx) and "hot_pred" in out_rows[0]:
+        hd = np.array([o.get("hot_design", np.nan) for o in out_rows])
+        hp = np.array([o.get("hot_pred", np.nan) for o in out_rows])
+        print(f"\nHotspot contact (mean fraction of {len(hidx)} hotspots): designed {np.nanmean(hd):.2f}, "
+              f"predicted {np.nanmean(hp):.2f}")
+        for lab, sel in (("all designs", np.ones(len(hp), bool)),
+                         ("iPAE<0.4", ipa < 0.4),
+                         ("iPAE<0.4 & RMSD<4", (ipa < 0.4) & (bi < 4))):
+            print(f"  {lab:20s}: n={int(sel.sum()):6d}  predicted hotspot contact median "
+                  f"{np.nanmedian(hp[sel]) if sel.any() else float('nan'):.2f}  "
+                  f">=0.6: {int((sel & (hp >= 0.6)).sum())}")
     if des_cnt is not None and n_hist:
         with open(args.contact_out, "w", newline="") as fh:
             w = csv.writer(fh)

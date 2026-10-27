@@ -15,6 +15,7 @@ def parse_args():
         "h100_2g.20gb:1",
         "h100_3g.40gb:1",
         "h100_80gb:1",
+        "gpu:1"
     ]
 
     # Required parameters
