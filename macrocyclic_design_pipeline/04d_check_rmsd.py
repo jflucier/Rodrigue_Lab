@@ -17,6 +17,10 @@ relaxed input complexes and computes, per predicted model:
                   in the input) still contacted by the predicted binder (prediction
                   fitted on the target). ~1 = right site; ~0 = binder predicted elsewhere.
   iface_jaccard   same overlap as intersection/union (also penalises extra contacts)
+  (full run) also writes --contact-out: for every target residue, how often it is in the
+                  DESIGNED interface vs how often the PREDICTED binder contacts it
+                  (all designs, and designs with iPAE < --ipae-cutoff-hist), to show
+                  whether AlphaFold funnels binders to one particular surface.
   complex_aligned Ca RMSD of target+binder after superposing on ALL Ca atoms
                   (what `align` + `rmsd` on the whole complex gives in ChimeraX)
   complex_raw     Ca RMSD of target+binder with NO superposition
@@ -116,6 +120,7 @@ def model_metrics(pred_b, pred_t, in_b, in_t, iface, contact_cutoff=8.0, in_cont
     d_pred = np.sqrt(((in_t[:, None, :] - f_t(pred_b)[None, :, :]) ** 2).sum(-1)).min(1)
     pi, di = set(np.where(d_pred < contact_cutoff)[0].tolist()), set(in_contact.tolist())
     return {
+        "_pred_contact": (d_pred < contact_cutoff),
         "iface_recall": len(pi & di) / max(len(di), 1),
         "iface_jaccard": len(pi & di) / max(len(pi | di), 1),
         "bind_tgtalign": rmsd(f_t(pred_b), in_b),
@@ -126,6 +131,21 @@ def model_metrics(pred_b, pred_t, in_b, in_t, iface, contact_cutoff=8.0, in_cont
         "complex_aligned": rmsd(f_all(both_p), both_i),
         "complex_raw": rmsd(both_p, both_i),
     }
+
+
+def target_resids(pdb_path, binder_chain, target_chain, n_t):
+    """Residue numbers (as in the input PDB) of the target chain CA atoms, in file order."""
+    out = {}
+    with open(pdb_path) as fh:
+        for line in fh:
+            if line[:6] == "ATOM  " and line[12:16] == " CA " and line[16] in (" ", "A", "1"):
+                out.setdefault(line[21], []).append(line[22:27].strip())
+    if target_chain in out and len(out[target_chain]) == n_t:
+        return out[target_chain]
+    for v in out.values():
+        if len(v) == n_t:
+            return v
+    return [str(i + 1) for i in range(n_t)]
 
 
 def design_paths(design, relax_out, pred_dir):
@@ -158,7 +178,7 @@ def analyse(design, relax_out, pred_dir, binder_chain, target_chain, iface_cutof
             raise ValueError(f"CA counts differ: prediction binder/target {len(pb)}/{len(pt)}, "
                              f"input {len(in_b)}/{len(in_t)}")
         per_model.append(model_metrics(pb, pt, in_b, in_t, iface, contact_cutoff, in_contact))
-    return per_model, iface
+    return per_model, iface, in_contact, in_path
 
 
 # ------------------------------------------------------------------------ main
@@ -184,6 +204,9 @@ def main():
     ap.add_argument("--contact-cutoff", type=float, default=8.0,
                     help="CA-CA distance (A) defining a target residue as contacted by the binder, "
                          "used for the site-recovery metric (iface_recall / iface_jaccard)")
+    ap.add_argument("--contact-out", default="target_contact_frequency.csv")
+    ap.add_argument("--ipae-cutoff-hist", type=float, default=0.40,
+                    help="iPAE cutoff for the 'confident' column of --contact-out")
     ap.add_argument("--ipae-cutoff", type=float, default=0.30)
     ap.add_argument("--rmsd-cutoff", type=float, default=1.5)
     ap.add_argument("--max", type=int, default=None, help="only analyse the first N designs")
@@ -205,9 +228,12 @@ def main():
     print(f"[*] {len(names)} designs to analyse")
 
     out_rows, n_fail = [], 0
+    des_cnt = pred_cnt = pred_cnt_conf = None
+    n_hist = n_hist_conf = 0
+    resids = None
     for k, name in enumerate(names, 1):
         try:
-            pm, iface = analyse(name, args.relax_out, args.predictions_dir, args.binder_chain,
+            pm, iface, in_contact, in_path = analyse(name, args.relax_out, args.predictions_dir, args.binder_chain,
                                 args.target_chain, args.interface_cutoff, args.contact_cutoff)
         except Exception as e:  # keep going; report at the end
             n_fail += 1
@@ -215,6 +241,21 @@ def main():
                 print(f"  [WARN] {name}: {e}")
             continue
         r = rows[name]
+        if not args.design:
+            n_t = len(pm[0]["_pred_contact"])
+            if des_cnt is None:
+                des_cnt, pred_cnt, pred_cnt_conf = np.zeros(n_t), np.zeros(n_t), np.zeros(n_t)
+                resids = target_resids(in_path, args.binder_chain, args.target_chain, n_t)
+            if n_t == len(des_cnt):
+                dv = np.zeros(n_t)
+                dv[in_contact] = 1.0
+                pv = np.mean([m["_pred_contact"] for m in pm], axis=0)
+                des_cnt += dv
+                pred_cnt += pv
+                n_hist += 1
+                if fnum(r.get("ipae")) < args.ipae_cutoff_hist:
+                    pred_cnt_conf += pv
+                    n_hist_conf += 1
         o = {"design": name, "n_models": len(pm),
              "rmsd_colabdesign": fnum(r.get("rmsd")), "ipae": fnum(r.get("ipae")),
              "plddt": fnum(r.get("plddt"))}
@@ -302,6 +343,21 @@ def main():
         print(f"  recall {label:36s}: {int(sel.sum()):6d} designs"
               f"  | of those iPAE<0.4: {int((sel & (ipa < 0.4)).sum())}"
               f"  | RMSD<4 A: {int((sel & (bi < 4)).sum())}")
+    if des_cnt is not None and n_hist:
+        with open(args.contact_out, "w", newline="") as fh:
+            w = csv.writer(fh)
+            w.writerow(["target_index", "resid", "designed_frac", "predicted_frac",
+                        f"predicted_frac_ipae_lt_{args.ipae_cutoff_hist}"])
+            for i in range(len(des_cnt)):
+                w.writerow([i + 1, resids[i], f"{des_cnt[i] / n_hist:.4f}", f"{pred_cnt[i] / n_hist:.4f}",
+                            f"{pred_cnt_conf[i] / max(n_hist_conf, 1):.4f}"])
+        print(f"\nPer-residue contact frequency written to {args.contact_out} "
+              f"({n_hist} designs; {n_hist_conf} with iPAE<{args.ipae_cutoff_hist})")
+        top = lambda v, n: ", ".join(f"{resids[i]}:{v[i]:.2f}" for i in np.argsort(-v)[:n])
+        print(f"  most often in the DESIGNED interface (resid:fraction): {top(des_cnt / n_hist, 10)}")
+        print(f"  most often contacted in the PREDICTION               : {top(pred_cnt / n_hist, 10)}")
+        print(f"  most contacted by confident (iPAE<{args.ipae_cutoff_hist}) predictions: "
+              f"{top(pred_cnt_conf / max(n_hist_conf, 1), 10)}")
     print("\n10 lowest-iPAE designs:")
     print(f"  {'design':36s} {'ipae':>6s} {'colab':>7s} {'bind_tgtalign':>14s} {'per model':>14s} {'recall':>7s}")
     for o in sorted(out_rows, key=lambda o: o["ipae"])[:10]:
