@@ -31,7 +31,7 @@ From: nvidia/cuda:12.6.3-base-ubuntu24.04
     cd /app
     wget -O uv-aarch64-unknown-linux-musl.tar.gz https://releases.astral.sh/github/uv/releases/download/0.13.6/uv-aarch64-unknown-linux-musl.tar.gz
     tar xvzf uv-aarch64-unknown-linux-musl.tar.gz
-    chmod +x /bin/uv
+    chmod +x /app/uv-aarch64-unknown-linux-musl/uv
 
     # [Insert HMMER / MMSeqs / Foldseek steps here...]
     cd /app
