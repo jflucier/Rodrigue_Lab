@@ -1,0 +1,50 @@
+Bootstrap: localimage
+From: ./rosetta_pyrosetta.clean.sif
+
+%post
+    export DEBIAN_FRONTEND=noninteractive
+
+    echo "_ssh:x:101:" >> /etc/group
+    rm -f /sbin/groupadd /usr/sbin/groupadd
+    ln -sf /bin/true /sbin/groupadd
+    ln -sf /bin/true /usr/sbin/groupadd
+
+    # --- Install git on the fly so we can clone ProteinMPNN ---
+    apt-get update && apt-get install -y git wget
+    rm -rf /var/lib/apt/lists/*
+
+    # Install PyTorch (CPU version is standard for portability, or omit --extra-index-url for GPU)
+    pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu126
+
+    # install boltz
+    wget -O /opt/boltz1.tar.gz https://github.com/jwohlwend/boltz/archive/refs/tags/v1.0.0.tar.gz
+    cd /opt
+    tar -xvzf boltz1.tar.gz
+
+    cd /opt
+    git clone https://github.com/xxiexuezhi/CyclicBoltz1.git /opt/CyclicBoltz1
+    mv /opt/boltz-1.0.0/src/boltz/model/ /opt/boltz-1.0.0/src/boltz/model_bak
+    ln -s /opt/CyclicBoltz1/model /opt/boltz-1.0.0/src/boltz/model
+
+    cd /opt/boltz-1.0.0
+    pip3 install .
+
+    # Download ProteinMPNN into /opt
+    mkdir -p /opt/proteinmpnn
+    git clone https://github.com/dauparas/ProteinMPNN.git /opt/proteinmpnn
+
+
+%environment
+    export PATH=/opt/proteinmpnn:$PATH
+
+%test
+    set -e
+    echo "=== Verify: rosetta_scripts ==="
+    /opt/rosetta/source/bin/rosetta_scripts.linuxgccrelease -help > /dev/null && echo "OK: rosetta_scripts works"
+
+    echo "=== Verify: PyRosetta ==="
+    python3 -c "import pyrosetta; pyrosetta.init('-mute all'); print('OK: PyRosetta version:', pyrosetta.version())"
+
+    echo "=== Verify: ProteinMPNN ==="
+    python3 /opt/proteinmpnn/protein_mpnn_run.py --help > /dev/null && echo "OK: ProteinMPNN script works"
+

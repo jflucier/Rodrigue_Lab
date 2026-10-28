@@ -31,12 +31,13 @@ source $PROGRAMS/alphafast/venv/bin/activate
 curl -LsSf https://hf.co/cli/install.sh | bash
 ./scripts/setup_databases.sh /net/nfs-bio/fast2/alphafast_dbs --from-prebuilt
 
-ml apptainer
-singularity pull alphafast.sif docker://romerolabduke/alphafast:latest
 
 ## weights
 cd ${PROGRAMS}/
 ln -s /home/jflucier/links/scratch/programs/alphafold3/weights .
 
-### install alphafast on gh
-
+  ./scripts/run_alphafast.sh \
+      --db_dir /net/nfs-bio/fast2/alphafast_dbs \
+      --weights_dir net/nfs-bio/fast2/alphafast_dbs/weights \
+      --input_dir /path/to/inputs \
+      --output_dir /path/to/outputs
