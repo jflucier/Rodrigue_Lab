@@ -6,7 +6,7 @@ From: nvidia/cuda:12.6.3-base-ubuntu24.04
     export UV_COMPILE_BYTECODE=0
     export UV_PROJECT_ENVIRONMENT=/app/alphafold3_venv
     # Fully qualified persistent runtime path mapping
-    export PATH="/app/alphafold3_venv/bin:/app/mmseqs/bin:/app/foldseek/bin:/app/uv-aarch64-unknown-linux-musl:$PATH"
+    export PATH="/app/alphafold3_venv/bin:/app/mmseqs/bin:/app/foldseek/bin:/app/uv-aarch64-unknown-linux-musl:/app/hmmer-3.4/bin:$PATH"
     export XLA_FLAGS="--xla_gpu_enable_triton_gemm=false"
     export XLA_CLIENT_MEM_FRACTION=0.95
 
@@ -40,17 +40,17 @@ From: nvidia/cuda:12.6.3-base-ubuntu24.04
     wget -O mmseqs-linux-gpu-arm64.tar.gz https://github.com/soedinglab/MMseqs2/releases/download/18-8cc5c/mmseqs-linux-gpu-arm64.tar.gz
     tar xvzf mmseqs-linux-gpu-arm64.tar.gz
 
-    wget -O hmmer-3.4.tar.gz https://github.com/EddyRivasLab/hmmer/archive/refs/tags/hmmer-3.4.tar.gz
+    wget -O hmmer-3.4.tar.gz http://eddylab.org/software/hmmer/hmmer.tar.gz
     tar xvzf hmmer-3.4.tar.gz
-    cd hmmer-hmmer-3.4/
-    ./configure --prefix=/app/hmmer-hmmer-3.4/
+    cd hmmer-3.4/
+    ./configure --prefix=/app/hmmer-3.4/
     make
     make check                        # optional: automated tests
     make install                      # optional: install HMMER programs and man pages
     cd easel && make install
 
     # Build the Python environment inside the cloned directory
-    export PATH="/app/alphafold3_venv/bin:/app/mmseqs/bin:/app/foldseek/bin:/app/uv-aarch64-unknown-linux-musl:$PATH"
+    export PATH="/app/alphafold3_venv/bin:/app/mmseqs/bin:/app/foldseek/bin:/app/uv-aarch64-unknown-linux-musl:/app/hmmer-3.4/bin:$PATH"
     cd /app/alphafast
     uv sync --frozen --all-groups --no-editable
     uv run build_data
