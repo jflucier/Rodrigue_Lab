@@ -28,6 +28,13 @@ Usage:
         --out-dir rfpeptides_runs_normalized/dnaJ_campaign \
         --max-macrocycle-len 30
 """
+import warnings
+warnings.filterwarnings(
+    "ignore",
+    category=UserWarning,
+    message=".*elements were guessed from atom name.*"
+)
+
 import argparse
 import shutil
 import sys
