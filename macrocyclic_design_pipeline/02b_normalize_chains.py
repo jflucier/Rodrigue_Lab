@@ -97,6 +97,7 @@ def main():
     # Calculate total and the 10% step size upfront
     total_pdbs = len(pdbs)
     step = max(1, total_pdbs // 10)
+    print(f"--- Progress: 0/{total_pdbs} ({int((0 / total_pdbs) * 100)}%) ---")
     n_ok, n_skipped = 0, 0
     for i, pdb in enumerate(pdbs, start=1):
         f = pdb_io.PDBFile.read(str(pdb))
