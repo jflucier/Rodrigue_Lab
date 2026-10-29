@@ -115,7 +115,7 @@ def main():
         out_file = pdb_io.PDBFile()
         pdb_io.set_structure(out_file, normalized)
         out_file.write(str(out_dir / pdb.name))
-        print(f"[OK]   {pdb.name}: {note}")
+        # print(f"[OK]   {pdb.name}: {note}")
         n_ok += 1
 
         # Check for 10% milestone on success
