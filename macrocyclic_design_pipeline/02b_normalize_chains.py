@@ -94,6 +94,9 @@ def main():
     if not pdbs:
         sys.exit(f"No .pdb files found under {in_dir}")
 
+    # Calculate total and the 10% step size upfront
+    total_pdbs = len(pdbs)
+    step = max(1, total_pdbs // 10)
     n_ok, n_skipped = 0, 0
     for i, pdb in enumerate(pdbs, start=1):
         f = pdb_io.PDBFile.read(str(pdb))
@@ -103,6 +106,10 @@ def main():
         if normalized is None:
             print(f"[SKIP] {pdb.name}: {note}")
             n_skipped += 1
+
+            # Check for 10% milestone on skip
+            if i % step == 0 or i == total_pdbs:
+                print(f"--- Progress: {i}/{total_pdbs} ({int((i / total_pdbs) * 100)}%) ---")
             continue
 
         out_file = pdb_io.PDBFile()
@@ -110,6 +117,10 @@ def main():
         out_file.write(str(out_dir / pdb.name))
         print(f"[OK]   {pdb.name}: {note}")
         n_ok += 1
+
+        # Check for 10% milestone on success
+        if i % step == 0 or i == total_pdbs:
+            print(f"--- Progress: {i}/{total_pdbs} ({int((i / total_pdbs) * 100)}%) ---")
 
 
     print(f"\n{n_ok} normalized, {n_skipped} skipped -> {out_dir}")
