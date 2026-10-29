@@ -53,13 +53,10 @@ From: nvidia/cuda:12.6.3-base-ubuntu24.04
     export PATH="/app/alphafold3_venv/bin:/app/mmseqs/bin:/app/foldseek/bin:/app/uv-aarch64-unknown-linux-musl:/app/hmmer-3.4/bin:$PATH"
     cd /app/alphafast
 
-    # FIXED: Strip xprof definitions entirely from pyproject.toml and uv.lock dependency trees
-    sed -i '/"xprof",/d' pyproject.toml
-    sed -i '/name = "xprof"/,/^$/d' uv.lock
-    sed -i '/name = "xprof"/d' uv.lock
-
     /app/uv-aarch64-unknown-linux-musl/uv venv $UV_PROJECT_ENVIRONMENT
-    /app/uv-aarch64-unknown-linux-musl/uv sync --frozen --all-groups --no-editable
+
+    /app/uv-aarch64-unknown-linux-musl/uv sync --all-groups --no-editable
+
     /app/uv-aarch64-unknown-linux-musl/uv run build_data
 
 %test
