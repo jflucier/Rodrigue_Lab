@@ -40,6 +40,7 @@ AFCYC_TEMPLATE = r"""#!/bin/bash
 #SBATCH --cpus-per-task=__AFCYC_CPUS__
 #SBATCH --mem=__AFCYC_MEM__
 #SBATCH --time=__AFCYC_TIME__
+#SBATCH --requeue
 
 # ROUND is exported by submit_afcyc.sh (--export=ALL,ROUND=n).
 set -uo pipefail
