@@ -138,6 +138,52 @@ def resolve_chain(structure, hotspot_tokens, target_chain: str):
         f"({', '.join(chains)}); set the target_chain column")
 
 
+def _ranges(nums):
+    """[1,2,3,7,9,10] -> [(1,3),(7,7),(9,10)]"""
+    out = []
+    for n in sorted(nums):
+        if out and n == out[-1][1] + 1:
+            out[-1] = (out[-1][0], n)
+        else:
+            out.append((n, n))
+    return out
+
+
+def _fmt(ranges):
+    return ", ".join(f"{a}" if a == b else f"{a}-{b}" for a, b in ranges)
+
+
+def describe_gaps(structure, chain: str, lo: int, hi: int, original=None) -> str:
+    """RFdiffusion needs EVERY residue number in the contig range (chain+lo-hi) to
+    exist in the PDB ("('A', 198) is not in pdb file!" otherwise). Returns a
+    readable message if the range has holes, else "". If `original` (the PDB before
+    cleaning) is given, also reports holes caused by our own stripping."""
+    present = {int(r) for r in structure.res_id[structure.chain_id == chain]}
+    missing = [i for i in range(lo, hi + 1) if i not in present]
+    if not missing:
+        return ""
+    segs = _ranges([i for i in range(lo, hi + 1) if i in present])
+    msg = (f"target chain {chain} residues {lo}-{hi}: {len(missing)} residue number(s) "
+           f"are not in the PDB ({_fmt(_ranges(missing))}), but RFdiffusion needs the "
+           f"whole contig range to exist. Contiguous stretches present: "
+           + ", ".join(f"{a}-{b} ({b - a + 1} res)" for a, b in segs)
+           + ". Set target_pos in the TSV to one contiguous stretch (it must contain "
+           "all hotspots).")
+    if original is not None:
+        om = original.chain_id == chain
+        names = {}
+        for rid, rn in zip(original.res_id[om], original.res_name[om]):
+            names.setdefault(int(rid), str(rn))
+        stripped = {i: names[i] for i in missing if i in names}
+        if stripped:
+            kinds = sorted(set(stripped.values()))
+            msg += (f" NOTE: {len(stripped)} of the missing numbers ({_fmt(_ranges(stripped))}) "
+                    f"exist in the input PDB but were removed as non-protein "
+                    f"({', '.join(kinds)}); if these are modified residues you want, "
+                    f"re-run with --keep-hetero <RES_NAME>.")
+    return msg
+
+
 def check_target_pos(structure, tokens, chain: str, target_pos: str):
     """Validate target_pos against the cleaned structure and the hotspots (if any).
     Returns (chain, lo, hi, full_lo, full_hi)."""
@@ -259,6 +305,12 @@ def main():
                   + ("hotspots inside range" if hotspot_tokens else "no hotspots"))
         else:
             print(f"[{name}] no target_pos: whole target will be used")
+            lo = full_lo = int(cleaned.res_id[cleaned.chain_id == chain].min())
+            hi = full_hi = int(cleaned.res_id[cleaned.chain_id == chain].max())
+
+        gap_msg = describe_gaps(cleaned, chain, lo, hi, original=structure)
+        if gap_msg:
+            sys.exit(f"[{name}] {gap_msg}")
 
         write_pdb(cleaned, out_path)
         print(f"[{name}] wrote {out_path}")
