@@ -24,6 +24,10 @@ otherwise, but must match the hotspot chain. Column hotspots may be left empty
 to design without hotspot guidance. Both columns are always written to
 targets_processed.tsv (the resolved chain is filled in).
 
+Only the target chain is written to the cleaned PDB (other protein chains are
+dropped, original chain ID and numbering kept); use --keep-all-chains to
+disable that.
+
 Optional column target_pos: the target residues to design against, as one
 contiguous range in the input PDB's own numbering, e.g. "1-66" (a chain
 letter prefix such as "A1-66" is also accepted; it must match the hotspot
@@ -185,6 +189,9 @@ def main():
                      help="Heteroatom residue name to keep instead of stripping "
                           "(e.g. a cofactor). Repeatable. Nothing is kept unless "
                           "explicitly whitelisted here.")
+    ap.add_argument("--keep-all-chains", action="store_true",
+                     help="Keep every protein chain instead of only the target chain "
+                          "(default: only the target chain is written).")
     args = ap.parse_args()
 
     out_dir = Path(args.out_dir).resolve()  # Convert output directory to absolute path
@@ -220,10 +227,8 @@ def main():
         cleaned, n_removed = strip_water_and_ligands(structure, args.keep_hetero)
 
         out_path = out_dir / f"{name}.pdb"
-        write_pdb(cleaned, out_path)
-
         print(f"[{name}] {in_path.name}: removed {n_removed}/{n_atoms_before} "
-              f"non-protein atoms -> {out_path}")
+              f"non-protein atoms")
 
         hotspot_tokens = parse_hotspots(row.get("hotspots"))
         try:
@@ -232,6 +237,15 @@ def main():
             sys.exit(f"[{name}] {e}")
         if not (cleaned.chain_id == chain).any():
             sys.exit(f"[{name}] chain {chain} not found in cleaned structure")
+
+        # Keep only the target chain (original chain ID and residue numbering are
+        # untouched, so hotspots and target_pos still refer to the same residues).
+        if not args.keep_all_chains:
+            other = sorted(set(cleaned.chain_id.tolist()) - {chain})
+            cleaned = cleaned[cleaned.chain_id == chain]
+            if other:
+                print(f"[{name}] kept target chain {chain} only; dropped chain(s): "
+                      f"{', '.join(other)}")
 
         target_pos = (row.get("target_pos") or "").strip()
         if target_pos:
@@ -245,6 +259,9 @@ def main():
                   + ("hotspots inside range" if hotspot_tokens else "no hotspots"))
         else:
             print(f"[{name}] no target_pos: whole target will be used")
+
+        write_pdb(cleaned, out_path)
+        print(f"[{name}] wrote {out_path}")
 
         new_row = dict(row)
         new_row["pdb_path"] = str(out_path)
