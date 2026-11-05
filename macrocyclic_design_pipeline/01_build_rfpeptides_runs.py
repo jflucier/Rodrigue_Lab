@@ -2,13 +2,22 @@
 """
 01_build_rfpeptides_runs.py
 
-Reads a TSV of targets (design_name, pdb_path, hotspots[, length][, target_pos])
-and writes one runnable Slurm sbatch script per row (.slurm).
+Reads a TSV of targets (design_name, pdb_path[, target_chain][, hotspots]
+[, length][, target_pos]) and writes one runnable Slurm sbatch script per row.
+
+Columns:
+  target_chain  Chain of the target to design against (e.g. "A"). Required when
+                a row has no hotspots (unless the PDB has a single chain).
+                If hotspots are given it is optional, but must match their chain.
+  hotspots      Comma-separated, chain-prefixed residues (e.g. "A68,A70"), all on
+                one chain. Leave EMPTY to run RFpeptides without hotspot
+                guidance (as done for MCL1 and MDM2 in the paper); the
+                ppi.hotspot_res option is then omitted from the command.
 
 Optional column target_pos: one contiguous residue range of the target chain
 to design against, in the input PDB's numbering ("1-66" or "A1-66"). It
 replaces the whole-chain range in the RFdiffusion contig, so the rest of the
-target is simply not given to the model. Hotspots keep the PDB's own
+target is simply not given to the model. Hotspots (if any) keep the PDB's own
 numbering and must all lie inside target_pos. Empty/absent = whole chain.
 
 Each design directory records its contig/hotspot parameters in
@@ -114,8 +123,7 @@ for W in $(seq 0 $(( WORKERS - 1 ))); do
         inference.cyclic=True \\
         diffuser.T=50 \\
         inference.cyc_chains='a' \\
-        'ppi.hotspot_res=[{hotspot_list}]' \\
-        hydra.run.dir={hydra_log_dir}/task_${{SLURM_ARRAY_TASK_ID}}_w${{W}} \\
+{hotspot_line}        hydra.run.dir={hydra_log_dir}/task_${{SLURM_ARRAY_TASK_ID}}_w${{W}} \\
         hydra.output_subdir={hydra_log_dir}/task_${{SLURM_ARRAY_TASK_ID}}_w${{W}}/hydra \\
         > {hydra_log_dir}/worker_${{SLURM_ARRAY_JOB_ID}}_${{SLURM_ARRAY_TASK_ID}}_w${{W}}.log 2>&1 &
     PIDS="$PIDS $!"
@@ -151,17 +159,37 @@ def chain_residue_range(structure, chain_id: str):
 
 
 def parse_hotspots(hotspot_str: str):
-    tokens = [t.strip() for t in hotspot_str.split(",") if t.strip()]
-    chains = set()
-    for tok in tokens:
-        if not tok:
-            continue
-        chains.add(tok[0])
-    if len(chains) != 1:
+    """Return the list of hotspot tokens (e.g. ['A68','A70']); empty list = no hotspots."""
+    return [t.strip() for t in (hotspot_str or "").split(",") if t.strip()]
+
+
+def resolve_chain(structure, hotspot_tokens, target_chain: str):
+    """Decide which chain is the target.
+
+    - hotspots given: their chain is the target chain; if target_chain is also
+      given it must agree.
+    - no hotspots: target_chain is used; if it is blank and the structure has a
+      single chain, that chain is used; otherwise it is an error.
+    """
+    hs_chains = {t[0] for t in hotspot_tokens}
+    if len(hs_chains) > 1:
         raise ValueError(
-            f"All hotspots in one row must be on the same chain, got: {hotspot_str}"
-        )
-    return chains.pop(), tokens
+            f"All hotspots in one row must be on the same chain, got: {','.join(hotspot_tokens)}")
+    target_chain = (target_chain or "").strip()
+    if hs_chains:
+        chain = next(iter(hs_chains))
+        if target_chain and target_chain != chain:
+            raise ValueError(
+                f"target_chain {target_chain!r} differs from hotspot chain {chain!r}")
+        return chain
+    if target_chain:
+        return target_chain
+    chains = sorted(set(structure.chain_id.tolist()))
+    if len(chains) == 1:
+        return chains[0]
+    raise ValueError(
+        "no hotspots and no target_chain given, and the structure has several chains "
+        f"({', '.join(chains)}); set the target_chain column")
 
 
 def resolve_target_pos(target_pos: str, chain: str, full_lo: int, full_hi: int, hotspot_tokens):
@@ -320,7 +348,7 @@ def main():
 
     with open(args.targets_tsv, newline="") as fh:
         reader = csv.DictReader(fh, delimiter="\t")
-        required = {"design_name", "pdb_path", "hotspots"}
+        required = {"design_name", "pdb_path"}
         missing = required - set(reader.fieldnames or [])
         if missing:
             sys.exit(f"TSV missing required columns: {missing}")
@@ -331,12 +359,14 @@ def main():
             if not name:
                 continue
             pdb_path = Path(row["pdb_path"].strip()).resolve()
-            hotspots_str = row["hotspots"].strip()
+            hotspots_str = (row.get("hotspots") or "").strip()
+            target_chain = (row.get("target_chain") or "").strip()
             length = (row.get("length") or "").strip() or args.default_length
 
             try:
                 structure = load_structure(str(pdb_path))
-                chain, hotspot_tokens = parse_hotspots(hotspots_str)
+                hotspot_tokens = parse_hotspots(hotspots_str)
+                chain = resolve_chain(structure, hotspot_tokens, target_chain)
                 lo, hi = chain_residue_range(structure, chain)
                 full_lo, full_hi = lo, hi
                 target_pos = (row.get("target_pos") or "").strip()
@@ -347,10 +377,14 @@ def main():
                 sys.exit(f"[{name}] failed to process: {e}")
 
             hotspot_list = ",".join(hotspot_tokens)
+            if hotspot_tokens:
+                hotspot_line = f"        'ppi.hotspot_res=[{hotspot_list}]' \\\n"
+            else:
+                hotspot_line = ""  # no hotspot guidance: omit the option entirely
             design_out_dir = out_dir / name
             design_out_dir.mkdir(exist_ok=True)
             print(f"[{name}] target {chain}{lo}-{hi} ({hi - lo + 1} of {full_hi - full_lo + 1} "
-                  f"residues); hotspots: {hotspot_list}")
+                  f"residues); hotspots: {hotspot_list or 'none'}")
             check_run_params(design_out_dir, {
                 "pdb_path": str(pdb_path), "length": length,
                 "target": f"{chain}{lo}-{hi}", "hotspots": hotspot_list}, name)
@@ -385,7 +419,7 @@ def main():
                 length=length,
                 chain=chain, lo=lo, hi=hi,
                 pdb_path=str(pdb_path),
-                hotspot_list=hotspot_list,
+                hotspot_line=hotspot_line,
                 hydra_log_dir=str(hydra_log_dir)
             )
 

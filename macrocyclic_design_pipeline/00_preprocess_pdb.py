@@ -8,7 +8,8 @@ downloaded from the Protein Data Bank and stripped of all water and
 ligands, leaving just the target protein atoms."
 
 Reads the same targets TSV used by 01_build_rfpeptides_runs.py
-(design_name, pdb_path, hotspots[, length][, target_pos]), strips waters and
+(design_name, pdb_path[, target_chain][, hotspots][, length][, target_pos]),
+strips waters and
 non-polymer/heteroatom records (crystallization additives, ions, small-
 molecule ligands, etc.) from each PDB, keeping only standard protein
 residues, and writes cleaned structures to 00_pdb_processed/.
@@ -16,6 +17,12 @@ residues, and writes cleaned structures to 00_pdb_processed/.
 Also writes an updated TSV (targets_processed.tsv, alongside the output
 dir) with pdb_path repointed at the cleaned files, so it can be handed
 straight to 01_build_rfpeptides_runs.py.
+
+Column target_chain: the chain of the target to design against ("A"). Needed
+when a row has no hotspots (unless the PDB has a single chain); optional
+otherwise, but must match the hotspot chain. Column hotspots may be left empty
+to design without hotspot guidance. Both columns are always written to
+targets_processed.tsv (the resolved chain is filled in).
 
 Optional column target_pos: the target residues to design against, as one
 contiguous range in the input PDB's own numbering, e.g. "1-66" (a chain
@@ -93,14 +100,43 @@ def strip_water_and_ligands(structure, keep_hetero=None):
     return structure[mask], int(n_removed)
 
 
-def check_target_pos(structure, hotspots_str: str, target_pos: str):
-    """Validate target_pos against the cleaned structure and the hotspots.
+def parse_hotspots(hotspot_str: str):
+    """Return the list of hotspot tokens (e.g. ['A68','A70']); empty list = no hotspots."""
+    return [t.strip() for t in (hotspot_str or "").split(",") if t.strip()]
+
+
+def resolve_chain(structure, hotspot_tokens, target_chain: str):
+    """Decide which chain is the target.
+
+    - hotspots given: their chain is the target chain; if target_chain is also
+      given it must agree.
+    - no hotspots: target_chain is used; if it is blank and the structure has a
+      single chain, that chain is used; otherwise it is an error.
+    """
+    hs_chains = {t[0] for t in hotspot_tokens}
+    if len(hs_chains) > 1:
+        raise ValueError(
+            f"All hotspots in one row must be on the same chain, got: {','.join(hotspot_tokens)}")
+    target_chain = (target_chain or "").strip()
+    if hs_chains:
+        chain = next(iter(hs_chains))
+        if target_chain and target_chain != chain:
+            raise ValueError(
+                f"target_chain {target_chain!r} differs from hotspot chain {chain!r}")
+        return chain
+    if target_chain:
+        return target_chain
+    chains = sorted(set(structure.chain_id.tolist()))
+    if len(chains) == 1:
+        return chains[0]
+    raise ValueError(
+        "no hotspots and no target_chain given, and the structure has several chains "
+        f"({', '.join(chains)}); set the target_chain column")
+
+
+def check_target_pos(structure, tokens, chain: str, target_pos: str):
+    """Validate target_pos against the cleaned structure and the hotspots (if any).
     Returns (chain, lo, hi, full_lo, full_hi)."""
-    tokens = [t.strip() for t in hotspots_str.split(",") if t.strip()]
-    chains = {t[0] for t in tokens}
-    if len(chains) != 1:
-        raise ValueError(f"hotspots must all be on one chain, got: {hotspots_str!r}")
-    chain = chains.pop()
 
     m = re.fullmatch(r"([A-Za-z]?)(\d+)\s*-\s*(\d+)", target_pos.strip())
     if not m:
@@ -121,7 +157,7 @@ def check_target_pos(structure, hotspots_str: str, target_pos: str):
     try:
         positions = [int(t[1:]) for t in tokens]
     except ValueError:
-        raise ValueError(f"cannot parse hotspot residue numbers in {hotspots_str!r}")
+        raise ValueError(f"cannot parse hotspot residue numbers in {tokens}")
     outside = [t for t, n in zip(tokens, positions) if not lo <= n <= hi]
     if outside:
         raise ValueError(f"hotspots outside target_pos {lo}-{hi}: {', '.join(outside)}")
@@ -137,7 +173,8 @@ def write_pdb(structure, out_path: Path):
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                   formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("targets_tsv", help="TSV: design_name, pdb_path, hotspots[, length]")
+    ap.add_argument("targets_tsv",
+                     help="TSV: design_name, pdb_path[, target_chain][, hotspots][, length][, target_pos]")
     ap.add_argument("--out-dir", default="00_pdb_processed",
                      help="Directory to write cleaned PDBs into")
     ap.add_argument("--out-tsv", default=None,
@@ -159,13 +196,14 @@ def main():
 
     with open(args.targets_tsv, newline="") as fh:
         reader = csv.DictReader(fh, delimiter="\t")
-        required = {"design_name", "pdb_path", "hotspots"}
+        required = {"design_name", "pdb_path"}
         missing = required - set(reader.fieldnames or [])
         if missing:
             sys.exit(f"TSV missing required columns: {missing}")
         fieldnames = list(reader.fieldnames)
-        if "target_pos" not in fieldnames:
-            fieldnames.append("target_pos")  # always emitted, blank if not provided
+        for col in ("hotspots", "target_chain", "target_pos"):
+            if col not in fieldnames:
+                fieldnames.append(col)  # always emitted, blank if not provided
         rows = list(reader)
 
     out_rows = []
@@ -187,21 +225,31 @@ def main():
         print(f"[{name}] {in_path.name}: removed {n_removed}/{n_atoms_before} "
               f"non-protein atoms -> {out_path}")
 
+        hotspot_tokens = parse_hotspots(row.get("hotspots"))
+        try:
+            chain = resolve_chain(cleaned, hotspot_tokens, row.get("target_chain"))
+        except ValueError as e:
+            sys.exit(f"[{name}] {e}")
+        if not (cleaned.chain_id == chain).any():
+            sys.exit(f"[{name}] chain {chain} not found in cleaned structure")
+
         target_pos = (row.get("target_pos") or "").strip()
         if target_pos:
             try:
                 chain, lo, hi, full_lo, full_hi = check_target_pos(
-                    cleaned, row["hotspots"], target_pos)
+                    cleaned, hotspot_tokens, chain, target_pos)
             except ValueError as e:
                 sys.exit(f"[{name}] {e}")
             print(f"[{name}] target_pos {target_pos}: chain {chain} residues {lo}-{hi} "
-                  f"({hi - lo + 1} of {full_hi - full_lo + 1}); hotspots inside range")
+                  f"({hi - lo + 1} of {full_hi - full_lo + 1}); "
+                  + ("hotspots inside range" if hotspot_tokens else "no hotspots"))
         else:
             print(f"[{name}] no target_pos: whole target will be used")
 
         new_row = dict(row)
         new_row["pdb_path"] = str(out_path)
         new_row["target_pos"] = target_pos
+        new_row["target_chain"] = chain
         out_rows.append(new_row)
 
     with open(out_tsv, "w", newline="") as fh:
