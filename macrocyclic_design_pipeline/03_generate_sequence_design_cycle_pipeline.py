@@ -182,8 +182,8 @@ process_backbone() {
     #BIAS_JSON="${ROUND_DIR}/bias_AA.json"
     #echo '{"S": 0.8}' > "${BIAS_JSON}"
 
+    #rmoved: --bias_AA_jsonl "${BIAS_JSON}"
     if ! singularity exec --nv --pwd /tmp -B __BIND_PATH__ ${MPS_BIND} "${IMG}" \
-        #--bias_AA_jsonl "${BIAS_JSON}"
         python3 "${MPNN_SCRIPT}" \
         --pdb_path "${CURRENT_PDB}" \
         --pdb_path_chains "A" \
