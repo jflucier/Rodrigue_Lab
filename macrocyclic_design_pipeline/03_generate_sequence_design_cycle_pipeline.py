@@ -149,6 +149,8 @@ process_backbone() {
     local NATIVE_HEADER NATIVE_SEQ H_LINE S_LINE DESIGNED_SEQ S_ONLY SERINE_COUNT
     local HAS_LINEAR_PS HAS_CYCLIC_PS l
     local -a FA
+    local N_ZERO N_MULTI N_LPS N_CPS N_TOT N_UNIQ PEPLEN REASON DOM FREPORT S_HIST_STR k
+    local -A SHIST USEQ
 
     STEM=$(awk -F'\t' -v n="${IDX}" 'NR==n{print $1}' "${LIST}")
     ORIG=$(awk -F'\t' -v n="${IDX}" 'NR==n{print $2}' "${LIST}")
@@ -198,23 +200,32 @@ process_backbone() {
         if [ ! -f "${FASTA_FILE}" ]; then
             echo "[WARN] ${STEM}: Expected fasta output ${FASTA_FILE} missing."
         else
-            # Read the FASTA once. Records: [native header, native seq, (header, seq) x samples],
             # samples ordered by temperature.
             mapfile -t FA < "${FASTA_FILE}"
             NATIVE_HEADER="${FA[0]}"
             NATIVE_SEQ="${FA[1]}"
+            
+            # Per-backbone failure accounting. Reasons are mutually exclusive, checked in this order:
+            #   zero_S   : no serine at all
+            #   multi_S  : 2 or more serines
+            #   one_S_linear_PS : exactly 1 S but a "PS" motif is present
+            #   one_S_cyclic_PS : exactly 1 S, no "PS", but sequence starts with S and ends with P (wrap-around PS)
+            N_ZERO=0; N_MULTI=0; N_LPS=0; N_CPS=0; N_TOT=0; PEPLEN=0
+            SHIST=(); USEQ=()
+            
             for (( l=2; l+1<${#FA[@]}; l+=2 )); do
                 H_LINE="${FA[l]}"
                 S_LINE="${FA[l+1]}"
-
+            
                 # Isolate Chain A sequence
                 DESIGNED_SEQ="${S_LINE%%/*}"
-
+                PEPLEN=${#DESIGNED_SEQ}
+            
                 S_ONLY="${DESIGNED_SEQ//[^S]/}"
                 SERINE_COUNT=${#S_ONLY}
                 HAS_LINEAR_PS=false; [[ "${DESIGNED_SEQ}" == *"PS"* ]] && HAS_LINEAR_PS=true
                 HAS_CYCLIC_PS=false; [[ "${DESIGNED_SEQ}" == S* && "${DESIGNED_SEQ}" == *P ]] && HAS_CYCLIC_PS=true
-
+            
                 if [ "${SERINE_COUNT}" -eq 1 ] && [ "${HAS_LINEAR_PS}" = false ] && [ "${HAS_CYCLIC_PS}" = false ]; then
                     echo "  --> Found valid sequence: ${DESIGNED_SEQ} (${H_LINE%%,*}, record $(( (l - 2) / 2 + 1 )) of $(( (${#FA[@]} - 2) / 2 )))"
                     # Reduce to a clean, standard 1-sample FASTA for the PyRosetta worker
@@ -222,9 +233,45 @@ process_backbone() {
                     SUCCESS=true
                     break
                 fi
+            
+                # Rejected: record why
+                N_TOT=$(( N_TOT + 1 ))
+                SHIST[${SERINE_COUNT}]=$(( ${SHIST[${SERINE_COUNT}]:-0} + 1 ))
+                USEQ[${DESIGNED_SEQ}]=1
+                if   [ "${SERINE_COUNT}" -eq 0 ]; then N_ZERO=$(( N_ZERO + 1 ))
+                elif [ "${SERINE_COUNT}" -ge 2 ]; then N_MULTI=$(( N_MULTI + 1 ))
+                elif [ "${HAS_LINEAR_PS}" = true ]; then N_LPS=$(( N_LPS + 1 ))
+                else                                     N_CPS=$(( N_CPS + 1 ))
+                fi
             done
+            
             if [ "${SUCCESS}" = false ]; then
-                echo "[WARN] ${STEM}: none of the $(( (${#FA[@]} - 2) / 2 )) sampled sequences satisfied the constraints."
+                N_UNIQ=${#USEQ[@]}
+            
+                # dominant failure reason
+                DOM="zero_S"; REASON=${N_ZERO}
+                [ "${N_MULTI}" -gt "${REASON}" ] && { DOM="multi_S";         REASON=${N_MULTI}; }
+                [ "${N_LPS}"   -gt "${REASON}" ] && { DOM="one_S_linear_PS"; REASON=${N_LPS}; }
+                [ "${N_CPS}"   -gt "${REASON}" ] && { DOM="one_S_cyclic_PS"; REASON=${N_CPS}; }
+            
+                # serine-count histogram, e.g. "0:312,1:40,2:48"
+                S_HIST_STR=""
+                if [ "${#SHIST[@]}" -gt 0 ]; then
+                    for k in $(printf '%s\n' "${!SHIST[@]}" | sort -n); do
+                        S_HIST_STR+="${S_HIST_STR:+,}${k}:${SHIST[$k]}"
+                    done
+                fi
+            
+                echo "[WARN] ${STEM}: none of the ${N_TOT} sampled sequences satisfied the constraints."
+                echo "[FAILSTATS] ${STEM} pep_len=${PEPLEN} n=${N_TOT} unique=${N_UNIQ} zero_S=${N_ZERO} multi_S=${N_MULTI} one_S_linear_PS=${N_LPS} one_S_cyclic_PS=${N_CPS} dominant=${DOM} S_hist=${S_HIST_STR}"
+            
+                # Persist per-backbone report + raw FASTA (ROUND_DIR is deleted below)
+                mkdir -p "${OUT}/fail_reports"
+                FREPORT="${OUT}/fail_reports/${STEM}_r${ROUND}"
+                printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+                    "${STEM}" "${ROUND}" "${PEPLEN}" "${N_TOT}" "${N_UNIQ}" \
+                    "${N_ZERO}" "${N_MULTI}" "${N_LPS}" "${N_CPS}" "${DOM}" "${S_HIST_STR}" > "${FREPORT}.tsv"
+                cp "${FASTA_FILE}" "${FREPORT}.fa"
             fi
         fi
     fi
