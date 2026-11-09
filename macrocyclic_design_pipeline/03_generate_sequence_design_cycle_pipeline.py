@@ -179,17 +179,17 @@ process_backbone() {
     echo "[${STEM}] round ${ROUND}: ProteinMPNN single call, temperatures: ${TEMPS}"
 
     SUCCESS=false
-    BIAS_JSON="${ROUND_DIR}/bias_AA.json"
-    echo '{"S": 0.8}' > "${BIAS_JSON}"
+    #BIAS_JSON="${ROUND_DIR}/bias_AA.json"
+    #echo '{"S": 0.8}' > "${BIAS_JSON}"
 
     if ! singularity exec --nv --pwd /tmp -B __BIND_PATH__ ${MPS_BIND} "${IMG}" \
+        #--bias_AA_jsonl "${BIAS_JSON}" \
         python3 "${MPNN_SCRIPT}" \
         --pdb_path "${CURRENT_PDB}" \
         --pdb_path_chains "A" \
         --sampling_temp "${TEMPS}" \
         --backbone_noise "0" \
-        --omit_AAs "C" \
-        --bias_AA_jsonl "${BIAS_JSON}" \
+        --omit_AAs "C" \        
         --num_seq_per_target "${NSEQ}" \
         --batch_size "${BATCH}" \
         --path_to_model_weights "${MPNN_WEIGHTS}" \
