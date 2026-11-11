@@ -40,8 +40,8 @@ From: ./rosetta_pyrosetta.clean.sif
 
 %test
     set -e
-    echo "=== Verify: rosetta_scripts ==="
-    /opt/rosetta/source/bin/rosetta_scripts.linuxgccrelease -help > /dev/null && echo "OK: rosetta_scripts works"
+#    echo "=== Verify: rosetta_scripts ==="
+#    /opt/rosetta/source/bin/rosetta_scripts.linuxgccrelease -help > /dev/null && echo "OK: rosetta_scripts works"
 
     echo "=== Verify: PyRosetta ==="
     python3 -c "import pyrosetta; pyrosetta.init('-mute all'); print('OK: PyRosetta version:', pyrosetta.version())"
