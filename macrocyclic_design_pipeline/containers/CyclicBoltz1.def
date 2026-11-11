@@ -28,7 +28,7 @@ From: ./rosetta_pyrosetta.clean.sif
 
     cd /opt/boltz-1.0.0
     pip3 install --upgrade pip setuptools wheel
-    pip3 install -e .
+    pip3 install -e ".[cuda]"
 
     # Download ProteinMPNN into /opt
     mkdir -p /opt/proteinmpnn
@@ -49,3 +49,15 @@ From: ./rosetta_pyrosetta.clean.sif
     echo "=== Verify: ProteinMPNN ==="
     python3 /opt/proteinmpnn/protein_mpnn_run.py --help > /dev/null && echo "OK: ProteinMPNN script works"
 
+    echo "=== Verify: Boltz Executable CLI ==="
+    boltz --help > /dev/null && echo "OK: boltz executable is globally accessible"
+
+    echo "=== Verify: Boltz CUDA Package Extras ==="
+    python3 -c "
+import importlib.metadata
+reqs = str(importlib.metadata.distribution('boltz').requires)
+if 'extra == \"cuda\"' in reqs:
+    print('OK: Boltz compiled with GPU/CUDA package extras')
+else:
+    raise RuntimeError('FAIL: Boltz was installed without [cuda] extras!')
+"
