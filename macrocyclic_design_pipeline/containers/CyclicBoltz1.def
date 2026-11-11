@@ -27,7 +27,7 @@ From: ./rosetta_pyrosetta.clean.sif
     ln -s /opt/CyclicBoltz1/model /opt/boltz-1.0.0/src/boltz/model
 
     cd /opt/boltz-1.0.0
-    pip3 install .
+    pip3 install --break-system-packages -e .
 
     # Download ProteinMPNN into /opt
     mkdir -p /opt/proteinmpnn
