@@ -1,0 +1,47 @@
+Bootstrap: docker
+From: nvcr.io/nvidia/dgl:24.05-py3
+
+%post
+    export DEBIAN_FRONTEND=noninteractive
+
+    # 1. Install necessary system build tools
+    apt-get update && apt-get install -y \
+        git cmake build-essential python3-pip python3-dev kalign \
+        && rm -rf /var/lib/apt/lists/*
+
+#    pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu126
+
+    git clone https://github.com/chaidiscovery/chai-lab.git /opt/chai-lab
+    cd /opt/chai-lab
+    pip3 install --no-cache-dir .
+
+    mkdir -p /home/jflucier/programs/Rodrigue_Lab/chai-1_models
+
+%environment
+    export LC_ALL=C
+    export DGLBACKEND="pytorch"
+    export CHAI_DOWNLOADS_DIR=/home/jflucier/programs/Rodrigue_Lab/chai-1_models
+
+%runscript
+    chai-lab "$@"
+
+%test
+    echo "=== 1. Checking chai-lab CLI and Python imports ==="
+    chai-lab --help > /dev/null
+    python3 -c "import chai_lab; import chai_lab.chai1; print('chai_lab imported successfully')"
+
+    echo "=== 2. Checking PyTorch CUDA & bfloat16 support ==="
+    python3 -c "
+import torch
+print(f'PyTorch version: {torch.__version__}')
+print(f'CUDA available:  {torch.cuda.is_available()}')
+if torch.cuda.is_available():
+    print(f'Device name:     {torch.cuda.get_device_name(0)}')
+    print(f'bfloat16 ready:  {torch.cuda.is_bf16_supported()}')
+    assert torch.cuda.is_bf16_supported(), 'Chai-1 requires CUDA bfloat16 support'
+    x = torch.randn(16, 16, device='cuda', dtype=torch.bfloat16)
+    y = x @ x.T
+    print('CUDA bfloat16 tensor test passed!')
+else:
+    print('WARNING: No GPU detected during build. Run apptainer test --nv <image>.sif on a GH200 node.')
+"

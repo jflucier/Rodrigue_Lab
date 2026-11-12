@@ -76,3 +76,6 @@ python3 /opt/proteinmpnn/protein_mpnn_run.py \
 # build afcycdesign
 salloc --partition=gh-bio --account=def-rodrigu1 --time=10:00:00 --gres=gpu:1 --cpus-per-task=16 --mem=100G
 singularity build --fakeroot afcycdesign_gh200.sif afcycdesign_gh200.def
+
+salloc --partition=gh-bio --account=def-rodrigu1 --time=10:00:00 --gres=gpu:1 --cpus-per-task=16 --mem=100G
+singularity build --fakeroot afcycdesign_gh200.sif afcycdesign_gh200.def
