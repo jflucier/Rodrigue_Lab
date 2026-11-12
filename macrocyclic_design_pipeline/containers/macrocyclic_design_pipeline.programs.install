@@ -78,4 +78,70 @@ salloc --partition=gh-bio --account=def-rodrigu1 --time=10:00:00 --gres=gpu:1 --
 singularity build --fakeroot afcycdesign_gh200.sif afcycdesign_gh200.def
 
 salloc --partition=gh-bio --account=def-rodrigu1 --time=10:00:00 --gres=gpu:1 --cpus-per-task=16 --mem=100G
-singularity build --fakeroot afcycdesign_gh200.sif afcycdesign_gh200.def
+export APPTAINER_TMPDIR=/tank/$USER/apptainer_tmp
+export APPTAINER_CACHEDIR=/tank/$USER/apptainer_cache
+mkdir -p "$APPTAINER_TMPDIR" "$APPTAINER_CACHEDIR"
+
+apptainer build chai-1_gh200.sif chai-1_gh200.def
+apptainer test --nv chai-1_gh200.sif
+
+mkdir -p /home/jflucier/programs/Rodrigue_Lab/chai-1_models
+cd /home/jflucier/programs/Rodrigue_Lab/chai-1_models
+
+apptainer exec \
+  --bind /home/jflucier/programs/Rodrigue_Lab/chai-1_models \
+  /home/jflucier/programs/Rodrigue_Lab/macrocyclic_design_pipeline/containers/chai-1_gh200.sif python3 -c "
+from chai_lab.utils.paths import chai1_component
+import chai_lab.utils.paths as paths
+
+components = [
+    'feature_embedding.pt',
+    'token_embedder.pt',
+    'trunk.pt',
+    'diffusion_module.pt',
+    'confidence_head.pt',
+    'esm2.pt',
+]
+
+# Download model weights (including traced ESM2)
+for component in components:
+    print(f'Downloading {component}...')
+    chai1_component(component)
+
+# Download cached RDKit conformers
+print('Downloading cached conformers...')
+paths.cached_conformers.get_path()
+print('All Chai-1 assets downloaded successfully!')
+"
+
+# 1. Download cached conformers (no exclamation mark)
+apptainer exec \
+  --bind /home/jflucier/programs/Rodrigue_Lab/chai-1_models \
+  /home/jflucier/programs/Rodrigue_Lab/macrocyclic_design_pipeline/containers/chai-1_gh200.sif \
+  python3 -c 'import chai_lab.utils.paths as paths; paths.cached_conformers.get_path(); print("Conformers downloaded.")'
+
+apptainer exec \
+  --bind /home/jflucier/programs/Rodrigue_Lab/chai-1_models \
+  /home/jflucier/programs/Rodrigue_Lab/macrocyclic_design_pipeline/containers/chai-1_gh200.sif \
+  python3 -c 'from chai_lab.data.dataset.embeddings.esm import ESM_URL; from chai_lab.utils.paths import downloads_path, download_if_not_exists; download_if_not_exists(ESM_URL, downloads_path.joinpath("esm/traced_sdpa_esm2_t36_3B_UR50D_fp16.pt")); print("ESM-2 model downloaded.")'
+
+## test chai-1
+# 1. Create a tiny test FASTA in /localscratch
+mkdir -p /localscratch/$USER/chai1_test
+cat << 'EOF' > /localscratch/$USER/chai1_test/test.fasta
+>protein|name=test_peptide
+ACDEFGHIKLMNPQRSTVWY
+EOF
+
+# 2. Run Chai-1 offline with --nv on your GH200 GPU
+apptainer run --nv \
+  --bind /home/jflucier/programs/Rodrigue_Lab/chai-1_models \
+  --bind /localscratch/$USER/chai1_test \
+  /home/jflucier/programs/Rodrigue_Lab/macrocyclic_design_pipeline/containers/chai-1_gh200.sif \
+  fold --use-esm-embeddings \
+  /localscratch/$USER/chai1_test/test.fasta \
+  /localscratch/$USER/chai1_test/output
+
+# 3. Check the generated CIF structures and scores, then clean up
+ls -lh /localscratch/$USER/chai1_test/output
+rm -rf /localscratch/$USER/chai1_test
