@@ -60,7 +60,7 @@ export XLA_PYTHON_CLIENT_PREALLOCATE=false
 export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
 
 run_worker () {  # $1 jobs tsv, $2 task id, $3 log
-    singularity exec --nv -B __BIND_PATH__,__SCRIPT_DIR__ "__SIF__" \
+    singularity exec --nv -B __BIND_PATH__,__SCRIPT_DIR__ ${TMPDIR:+-B "${TMPDIR}"} "__SIF__" \
         python3 "__SCRIPT_DIR__/05_cyclicboltz_validate.py" \
         --jobs-tsv "$1" --out-dir "${OUT}" --task-id "$2" \
         --binder-chain __BINDER_CHAIN__ --target-chain __TARGET_CHAIN__ \
