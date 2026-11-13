@@ -104,6 +104,7 @@ def main():
     ap.add_argument("--sampling-steps", type=int, default=200)
     ap.add_argument("--diffusion-samples", type=int, default=1)
     ap.add_argument("--batch-size", type=int, default=25, help="designs per `boltz predict` call")
+    ap.add_argument("--scratch-dir", default=None, help="scratch root (must be visible in the container)")
     ap.add_argument("--extra-args", default="", help="extra flags appended to `boltz predict`")
     a = ap.parse_args()
 
@@ -125,7 +126,13 @@ def main():
     if new:
         w.writeheader()
 
-    scratch_root = os.environ.get("TMPDIR") or str(logs)
+    # SLURM's TMPDIR (/localscratch/...) is usually not bound into the container,
+    # so only use it if it is visible here; otherwise scratch under the output dir.
+    scratch_root = a.scratch_dir or os.environ.get("TMPDIR") or ""
+    if not scratch_root or not os.path.isdir(scratch_root) or not os.access(scratch_root, os.W_OK):
+        scratch_root = str(Path(a.out_dir) / "tmp")
+    os.makedirs(scratch_root, exist_ok=True)
+    print(f"[*] scratch: {scratch_root}", flush=True)
     for b0 in range(0, len(jobs), a.batch_size):
         batch = jobs[b0:b0 + a.batch_size]
         tmp = Path(tempfile.mkdtemp(prefix=f"cboltz_{a.task_id}_", dir=scratch_root))
@@ -162,9 +169,21 @@ def main():
             if a.extra_args:
                 cmd += a.extra_args.split()
             print("[*] " + " ".join(cmd), flush=True)
-            rc = subprocess.run(cmd).returncode
+            # torch>=2.6 defaults to weights_only=True, which cannot unpickle the official
+            # Boltz-1 Lightning checkpoint (omegaconf DictConfig). The checkpoint is the
+            # official Boltz download, so force the legacy behaviour for this subprocess.
+            env = dict(os.environ)
+            env.setdefault("TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD", "1")
+            rc = subprocess.run(cmd, env=env).returncode
+            n_pred = len(glob.glob(str(res / "**" / "predictions" / "*" / "*_model_0.pdb"), recursive=True))
             if rc != 0:
-                print(f"[WARN] boltz exited {rc}; harvesting whatever was written", flush=True)
+                print(f"[WARN] boltz exited {rc}; {n_pred} predictions written", flush=True)
+            if rc != 0 and n_pred == 0:
+                # systematic failure: do not write error rows (they would be skipped on resume)
+                out.close()
+                shutil.rmtree(tmp, ignore_errors=True)
+                sys.exit(f"[ERROR] boltz failed with no output for batch starting at {b0}; "
+                         f"nothing written to {csv_path} for it")
 
         for design, pdb in meta.items():
             row = rows[design]
