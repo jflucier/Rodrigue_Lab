@@ -80,12 +80,15 @@ def compare(pred_pdb, ref_pdb, bch, tch):
 
 
 def write_yaml(path, binder_seq, target_seq, bch, tch, target_msa):
+    # CyclicBoltz1's relative-position encoder applies the cyclic offset to the LAST
+    # chain of the complex (l2 = residue_index[0,-1] + 1), so the cyclic binder must be
+    # listed last; the chain IDs are unaffected.
     path.write_text(
         "version: 1\nsequences:\n"
-        f"  - protein:\n      id: {bch}\n      sequence: {binder_seq}\n"
-        f"      msa: empty\n      cyclic: true\n"
         f"  - protein:\n      id: {tch}\n      sequence: {target_seq}\n"
-        f"      msa: {target_msa}\n")
+        f"      msa: {target_msa}\n"
+        f"  - protein:\n      id: {bch}\n      sequence: {binder_seq}\n"
+        f"      msa: empty\n      cyclic: true\n")
 
 
 def main():
