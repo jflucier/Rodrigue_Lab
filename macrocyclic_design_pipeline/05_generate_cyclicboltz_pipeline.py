@@ -157,7 +157,6 @@ PREP_TEMPLATE = r"""#!/bin/bash
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=24G
 #SBATCH --time=00:30:00
-#SBATCH --requeue
 
 # One-off: build the target MSA with the Boltz MSA server. A full complex (target +
 # first hit's cyclic binder, binder last) is predicted so the run completes; only the
@@ -216,7 +215,7 @@ def main():
     ap.add_argument("--chunk-size", type=int, default=100)
     ap.add_argument("--max-concurrent", type=int, default=50)
     ap.add_argument("--workers", type=int, default=2, help="concurrent boltz processes per GPU task")
-    ap.add_argument("--time", default="00:30:00")
+    ap.add_argument("--time", default="02:00:00")
     ap.add_argument("--mem", default=None, help="default 24G x workers")
     ap.add_argument("--cpus", type=int, default=None, help="default 4 x workers")
     ap.add_argument("--binder-chain", default="A")

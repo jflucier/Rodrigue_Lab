@@ -65,18 +65,27 @@ def rmsd(A, B):
     return float(np.sqrt(((A - B) ** 2).sum(1).mean()))
 
 
-def compare(pred_pdb, ref_pdb, bch, tch):
+def compare(pred_pdb, ref_pdb, bch, tch, rbch=None, rtch=None):
+    """bch/tch: chain IDs in the Boltz prediction; rbch/rtch: chain IDs in the reference."""
+    auto = rbch is None and rtch is None
+    rbch, rtch = rbch or bch, rtch or tch
     p, r = read_ca(pred_pdb), read_ca(ref_pdb)
-    for ch in (bch, tch):
-        if ch not in p or ch not in r:
-            raise ValueError(f"chain {ch} missing (pred {sorted(p)}, ref {sorted(r)})")
-        if len(p[ch]) != len(r[ch]):
-            raise ValueError(f"chain {ch}: {len(p[ch])} CA in prediction vs {len(r[ch])} in reference")
+    # AfCycDesign prediction PDBs often have the chains swapped (target A, binder B):
+    # if lengths only match the other way round, swap automatically.
+    if auto and all(c in p and c in r for c in (bch, tch)) \
+            and len(p[bch]) != len(r[bch]) \
+            and len(p[bch]) == len(r[tch]) and len(p[tch]) == len(r[bch]):
+        rbch, rtch = tch, bch
+    for pc_, rc_ in ((bch, rbch), (tch, rtch)):
+        if pc_ not in p or rc_ not in r:
+            raise ValueError(f"chain missing (pred {sorted(p)} wants {pc_}; ref {sorted(r)} wants {rc_})")
+        if len(p[pc_]) != len(r[rc_]):
+            raise ValueError(f"{len(p[pc_])} CA in prediction chain {pc_} vs {len(r[rc_])} in reference chain {rc_}")
     xyz = lambda d, c: np.array([a[1] for a in d[c]])
-    Pt, Qt = xyz(p, tch), xyz(r, tch)
+    Pt, Qt = xyz(p, tch), xyz(r, rtch)
     R, pc, qc = kabsch(Pt, Qt)               # move prediction onto reference via target
     Pb = (xyz(p, bch) - pc) @ R.T + qc
-    return rmsd(Pb, xyz(r, bch)), rmsd((Pt - pc) @ R.T + qc, Qt)
+    return rmsd(Pb, xyz(r, rbch)), rmsd((Pt - pc) @ R.T + qc, Qt)
 
 
 def write_yaml(path, binder_seq, target_seq, bch, tch, target_msa):
@@ -100,6 +109,8 @@ def main():
     ap.add_argument("--target-chain", default="B")
     ap.add_argument("--rmsd-cutoff", type=float, default=2.0)
     ap.add_argument("--afcyc-pred-dir", default=None)
+    ap.add_argument("--ref-binder-chain", default=None, help="binder chain ID in the reference PDB (default: --binder-chain)")
+    ap.add_argument("--ref-target-chain", default=None, help="target chain ID in the reference PDB (default: --target-chain)")
     ap.add_argument("--target-msa", default="empty", help="a3m/csv for the target, or 'empty'")
     ap.add_argument("--boltz-cmd", default="boltz")
     ap.add_argument("--boltz-cache", default=None)
@@ -118,8 +129,16 @@ def main():
     jobs = [l.rstrip("\n").split("\t") for l in open(a.jobs_tsv) if l.strip()]
     done = set()
     if csv_path.exists():
-        with open(csv_path) as fh:
-            done = {r["design"] for r in csv.DictReader(fh)}
+        with open(csv_path, newline="") as fh:
+            old = list(csv.DictReader(fh))
+        keep = [r for r in old if not r.get("error")]
+        if len(keep) != len(old):          # error rows are retried, not skipped
+            with open(csv_path, "w", newline="") as fh:
+                wr = csv.DictWriter(fh, fieldnames=COLS, extrasaction="ignore")
+                wr.writeheader()
+                wr.writerows(keep)
+            print(f"[*] dropped {len(old) - len(keep)} error rows from a previous attempt (will retry)", flush=True)
+        done = {r["design"] for r in keep}
     jobs = [j for j in jobs if j[0] not in done]
     print(f"[*] task {a.task_id}: {len(jobs)} designs to run ({len(done)} already done)", flush=True)
 
@@ -197,11 +216,15 @@ def main():
                     raise FileNotFoundError("no Boltz prediction written")
                 ref, src = pdb, "relaxed_input"
                 if a.afcyc_pred_dir:
-                    c = sorted(glob.glob(str(Path(a.afcyc_pred_dir) / f"{design}*.pdb")))
+                    c = sorted(glob.glob(str(Path(a.afcyc_pred_dir) / "**" / f"{design}*.pdb"), recursive=True))
                     if c:
                         ref, src = c[0], "afcyc_prediction"
                 row["ref_source"] = src
-                rb, rt = compare(hits[0], ref, a.binder_chain, a.target_chain)
+                if src == "afcyc_prediction":
+                    rb, rt = compare(hits[0], ref, a.binder_chain, a.target_chain,
+                                     a.ref_binder_chain, a.ref_target_chain)
+                else:
+                    rb, rt = compare(hits[0], ref, a.binder_chain, a.target_chain)
                 row["rmsd_binder"], row["rmsd_target"] = f"{rb:.4f}", f"{rt:.4f}"
                 row["agree"] = rb < a.rmsd_cutoff
                 cj = glob.glob(str(res / "**" / "predictions" / design / f"confidence_{design}_model_0.json"),

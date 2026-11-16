@@ -31,8 +31,19 @@ def main():
         seen.add(int(m.group(1)))
         with open(f, newline="") as fh:
             rd = csv.DictReader(fh)
+            if not rd.fieldnames:
+                print(f"[WARN] {f}: empty, skipped")
+                continue
+            if "error" not in rd.fieldnames or "design" not in rd.fieldnames:
+                print(f"[WARN] {f}: unexpected header {rd.fieldnames}, skipped")
+                continue
             fields = fields or rd.fieldnames
             rows += list(rd)
+    shards = [f for f in glob.glob(str(out / "logs" / "cboltz_task*.csv"))
+              if (re.search(r"cboltz_task(\d+)\.csv$", f) and int(re.search(r"cboltz_task(\d+)\.csv$", f).group(1)) >= 100000)]
+    if shards:
+        print(f"[WARN] {len(shards)} unmerged shard CSV(s) in logs/ (tasks still running or a worker failed); "
+              f"they are ignored here")
     if a.expected_tasks:
         miss = sorted(set(range(1, a.expected_tasks + 1)) - seen)
         if miss:
@@ -46,13 +57,13 @@ def main():
             w.writeheader()
             w.writerows(subset)
 
-    ok = [r for r in rows if not r["error"]]
+    ok = [r for r in rows if not r.get("error")]
     cons = sorted((r for r in ok if r["agree"] == "True"), key=lambda r: float(r["rmsd_binder"]))
     dis = [r for r in ok if r["agree"] != "True"]
     write("cboltz_summary.csv", rows)
     write("consensus_hits.csv", cons)
     write("tiebreak_candidates.csv", dis)
-    write("cboltz_errors.csv", [r for r in rows if r["error"]])
+    write("cboltz_errors.csv", [r for r in rows if r.get("error")])
     with open(out / "consensus_hits.fasta", "w") as fh:
         for r in cons:
             fh.write(f">{r['design']} rmsd={r['rmsd_binder']} iptm={r['iptm']}\n{r['sequence']}\n")
