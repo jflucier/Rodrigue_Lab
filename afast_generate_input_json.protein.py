@@ -95,9 +95,12 @@ def main():
                 # Complex Naming Architecture Logic
                 multimer_prefix = (row.get('multimer_name') or "").strip()
                 if multimer_prefix:
-                    output_filename = f"{multimer_prefix}__{last_protein_name}.json"
+                    raw_filename = f"{multimer_prefix}__{last_protein_name}.json"
                 else:
-                    output_filename = f"{last_protein_name}_complex_{row_idx}.json"
+                    raw_filename = f"{last_protein_name}_complex_{row_idx}.json"
+
+                # Replace any commas with underscores for both filename and JSON 'name' tag
+                output_filename = raw_filename.replace(",", "_")
 
                 json_data = {
                     "name": output_filename.replace(".json", ""),
