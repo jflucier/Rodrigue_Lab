@@ -43,6 +43,8 @@ LIST="${OUT}/hits.tsv"
 CHUNK=__CHUNK__
 W=__WORKERS__
 TID=${SLURM_ARRAY_TASK_ID}
+USE_MPS=__USE_MPS__
+MPS_BIND=""
 
 TOTAL=$(wc -l < "${LIST}")
 START=$(( (TID - 1) * CHUNK + 1 ))
@@ -54,20 +56,20 @@ JOBS="${OUT}/logs/cboltz_task${TID}.tsv"
 sed -n "${START},${END}p" "${LIST}" > "${JOBS}"
 N_JOBS=$(wc -l < "${JOBS}")
 TASK_CSV="${OUT}/logs/cboltz_task${TID}.csv"
-echo "=== CyclicBoltz1 task ${TID}: entries ${START}-${END} (${N_JOBS}) on $(hostname), ${W} worker(s) ==="
+echo "=== CyclicBoltz1 task ${TID}: entries ${START}-${END} (${N_JOBS}) on $(hostname), ${W} worker(s), MPS ${USE_MPS} ==="
 
 export XLA_PYTHON_CLIENT_PREALLOCATE=false
 export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
 
 run_worker () {  # $1 jobs tsv, $2 task id, $3 log
-    singularity exec --nv -B __BIND_PATH__,__SCRIPT_DIR__ ${TMPDIR:+-B "${TMPDIR}"} "__SIF__" \
+    singularity exec --nv -B __BIND_PATH__,__SCRIPT_DIR__ ${TMPDIR:+-B "${TMPDIR}"} ${MPS_BIND} "__SIF__" \
         python3 "__SCRIPT_DIR__/05_cyclicboltz_validate.py" \
         --jobs-tsv "$1" --out-dir "${OUT}" --task-id "$2" \
         --binder-chain __BINDER_CHAIN__ --target-chain __TARGET_CHAIN__ \
         --rmsd-cutoff __RMSD_CUTOFF__ --batch-size __BOLTZ_BATCH__ \
         --recycling-steps __RECYCLING__ --sampling-steps __SAMPLING__ \
         --target-msa "__TARGET_MSA__" --boltz-cmd "__BOLTZ_CMD__" \
-        __CACHE_ARG__ __PRED_DIR_ARG__ __EXTRA_ARG__ > "$3" 2>&1
+        __CACHE_ARG__ __PRED_DIR_ARG__ __REFCHAIN_ARGS__ __EXTRA_ARG__ > "$3" 2>&1
 }
 
 if [ "${W}" -le 1 ] || [ "${N_JOBS}" -le 1 ]; then
@@ -79,6 +81,20 @@ if [ "${W}" -le 1 ] || [ "${N_JOBS}" -le 1 ]; then
 fi
 
 [ "${W}" -gt "${N_JOBS}" ] && W=${N_JOBS}
+# Optional CUDA MPS so the workers' kernels can overlap on the one GPU.
+if [ "${USE_MPS}" -eq 1 ]; then
+    export CUDA_MPS_PIPE_DIRECTORY="/tmp/nvidia-mps-${SLURM_JOB_ID}"
+    export CUDA_MPS_LOG_DIRECTORY="/tmp/nvidia-log-${SLURM_JOB_ID}"
+    mkdir -p "${CUDA_MPS_PIPE_DIRECTORY}" "${CUDA_MPS_LOG_DIRECTORY}"
+    if nvidia-cuda-mps-control -d; then
+        MPS_BIND="-B ${CUDA_MPS_PIPE_DIRECTORY}"
+    else
+        echo "[WARN] could not start the MPS daemon; continuing without MPS"
+        unset CUDA_MPS_PIPE_DIRECTORY CUDA_MPS_LOG_DIRECTORY
+        USE_MPS=0
+    fi
+fi
+
 PIDS=(); SHARDS=()
 # resume: shard CSVs from an earlier attempt are kept and the worker skips finished designs
 [ -f "${TASK_CSV}" ] && echo "[*] existing task CSV found; merged below with new shard results"
@@ -97,6 +113,8 @@ for k in "${!PIDS[@]}"; do
     wait "${PIDS[$k]}" || { echo "[WARN] worker ${k} exited non-zero"; FAIL=1; }
     echo "----- worker ${k} log -----"; cat "${OUT}/logs/cboltz_task${TID}.shard${k}.log"
 done
+
+[ "${USE_MPS}" -eq 1 ] && { echo quit | nvidia-cuda-mps-control || true; }
 
 EXISTING=()
 for f in "${SHARDS[@]}"; do [ -s "${f}" ] && EXISTING+=("${f}"); done
@@ -185,8 +203,11 @@ def main():
     ap.add_argument("--out-dir", required=True)
     ap.add_argument("--sif", required=True, help="CyclicBoltz1 container")
     ap.add_argument("--afcyc-pred-dir", default=None,
-                    help="Dir with AfCycDesign predicted complexes (<design>*.pdb); "
-                         "default: use the relaxed input complex as reference")
+                    help="Dir with AfCycDesign predicted complexes (<design>*.pdb, searched recursively). "
+                         "Default: <afcyc-out>/predictions if it exists, else the relaxed input complex")
+    ap.add_argument("--ref-binder-chain", default=None, help="binder chain ID in the AfCycDesign prediction PDBs")
+    ap.add_argument("--ref-target-chain", default=None, help="target chain ID in the AfCycDesign prediction PDBs")
+    ap.add_argument("--no-mps", action="store_true", help="Do not start CUDA MPS when --workers > 1")
     ap.add_argument("--max-hits", type=int, default=None, help="cap (after sorting by iPAE); use 2-10 for a smoke test")
     ap.add_argument("--sort-by-ipae", action="store_true", default=True)
     ap.add_argument("--queue", default="gh-bio")
@@ -270,6 +291,14 @@ def main():
         target_msa = msa_file
     elif a.target_msa != "empty":
         target_msa = str(Path(a.target_msa).resolve())
+    use_mps = 1 if (a.workers > 1 and not a.no_mps) else 0
+    pred_dir = Path(a.afcyc_pred_dir).resolve() if a.afcyc_pred_dir else (
+        afc / "predictions" if (afc / "predictions").is_dir() else None)
+    ref_args = ""
+    if a.ref_binder_chain:
+        ref_args += f" --ref-binder-chain {a.ref_binder_chain}"
+    if a.ref_target_chain:
+        ref_args += f" --ref-target-chain {a.ref_target_chain}"
     mem = a.mem or f"{24 * a.workers}G"
     cpus = a.cpus or 4 * a.workers
     m = {
@@ -281,7 +310,8 @@ def main():
         "RECYCLING": a.recycling_steps, "SAMPLING": a.sampling_steps,
         "TARGET_MSA": target_msa, "AUTO_MSA": 1 if auto_msa else 0, "MSA_FILE": msa_file, "BOLTZ_CMD": a.boltz_cmd,
         "CACHE_ARG": f'--boltz-cache "{a.boltz_cache}"' if a.boltz_cache else "",
-        "PRED_DIR_ARG": f'--afcyc-pred-dir "{Path(a.afcyc_pred_dir).resolve()}"' if a.afcyc_pred_dir else "",
+        "PRED_DIR_ARG": f'--afcyc-pred-dir "{pred_dir}"' if pred_dir else "",
+        "REFCHAIN_ARGS": ref_args, "USE_MPS": use_mps,
         "EXTRA_ARG": f'--extra-args "{a.extra_args}"' if a.extra_args else "",
         "N_TASKS": n_tasks, "MAX_CONC": a.max_concurrent,
     }
@@ -295,7 +325,8 @@ def main():
     print("=" * 70)
     print(f"Designs to validate : {len(lines)}  ->  {n_tasks} array tasks (chunk {a.chunk_size})")
     print(f"Workers/task        : {a.workers} (cpus {cpus}, mem {mem}, time {a.time})")
-    print(f"Reference pose      : {'AfCycDesign prediction dir' if a.afcyc_pred_dir else 'relaxed input complex'}")
+    print(f"Reference pose      : {pred_dir if pred_dir else 'relaxed input complex'}")
+    print(f"MPS                 : {'on' if use_mps else 'off'}")
     print(f"Target MSA          : {'auto (prep job -> ' + str(msa_file) + ')' if auto_msa else target_msa}")
     print(f"Consensus           : binder CA RMSD (target-fitted) < {a.rmsd_cutoff} A")
     print(f"Launch              : bash {sub}      (smoke test: bash {sub} 1-1)")
