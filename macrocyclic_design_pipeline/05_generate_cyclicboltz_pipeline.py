@@ -113,10 +113,63 @@ exit "${FAIL}"
 
 SUBMIT = r"""#!/bin/bash
 # submit_cboltz.sh [TASK_RANGE]   e.g. bash submit_cboltz.sh 1-3   (default: all tasks)
+# If the target MSA is auto-generated and not there yet, a prep job runs first and the
+# array waits for it (afterok).
 set -uo pipefail
 RANGE="${1:-1-__N_TASKS__}"
-sbatch --array=${RANGE}%__MAX_CONC__ "__OUT__/cboltz_step.slurm"
+DEP=""
+if [ "__AUTO_MSA__" = "1" ] && [ ! -s "__MSA_FILE__" ]; then
+    PREP=$(sbatch --parsable "__OUT__/prep_msa.slurm") || exit 1
+    PREP="${PREP%%;*}"
+    echo "Submitted target-MSA job ${PREP}"
+    DEP="--dependency=afterok:${PREP}"
+else
+    echo "Using target MSA: __MSA_FILE__"
+fi
+sbatch ${DEP} --array=${RANGE}%__MAX_CONC__ "__OUT__/cboltz_step.slurm"
 """
+
+PREP_TEMPLATE = r"""#!/bin/bash
+#SBATCH --job-name=mcy_cboltz_msa
+#SBATCH --partition=__QUEUE__
+#SBATCH --output=__OUT__/logs/cboltz_msa_%j.log
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --gres=gpu:1
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=24G
+#SBATCH --time=00:30:00
+
+# One-off: build the target MSA with the Boltz MSA server. A full complex (target +
+# first hit's cyclic binder, binder last) is predicted so the run completes; only the
+# MSA file is used downstream.
+set -uo pipefail
+export TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1
+singularity exec --nv -B __BIND_PATH__ ${TMPDIR:+-B "${TMPDIR}"} "__SIF__" \
+    boltz predict "__OUT__/msa/prep.yaml" --use_msa_server \
+    --out_dir "__OUT__/msa" --output_format pdb --override __CACHE_ARG__
+if [ ! -s "__MSA_FILE__" ]; then
+    echo "[ERROR] expected MSA not found: __MSA_FILE__"
+    find "__OUT__/msa" -name '*.csv' -path '*msa*'
+    exit 1
+fi
+echo "[*] target MSA ready: __MSA_FILE__"
+"""
+
+
+AA3 = {"ALA": "A", "ARG": "R", "ASN": "N", "ASP": "D", "CYS": "C", "GLN": "Q",
+       "GLU": "E", "GLY": "G", "HIS": "H", "ILE": "I", "LEU": "L", "LYS": "K",
+       "MET": "M", "PHE": "F", "PRO": "P", "SER": "S", "THR": "T", "TRP": "W",
+       "TYR": "Y", "VAL": "V"}
+
+
+def chain_seq(pdb, chain):
+    seq = []
+    for l in open(pdb):
+        if l.startswith(("ATOM", "HETATM")) and l[12:16].strip() == "CA" and l[21] == chain \
+                and l[16] in (" ", "A"):
+            seq.append(AA3.get(l[17:20].strip(), "X"))
+    return "".join(seq)
 
 
 def fill(t, m):
@@ -147,7 +200,9 @@ def main():
     ap.add_argument("--binder-chain", default="A")
     ap.add_argument("--target-chain", default="B")
     ap.add_argument("--rmsd-cutoff", type=float, default=2.0)
-    ap.add_argument("--target-msa", default="empty", help="a3m/csv for the target or 'empty'")
+    ap.add_argument("--target-msa", default="auto",
+                    help="'auto' (default): a prep job builds it with the Boltz MSA server; "
+                         "'empty': single sequence; or a path to an existing a3m/csv")
     ap.add_argument("--boltz-cmd", default="boltz")
     ap.add_argument("--boltz-cache", default=None, help="Boltz weights/ccd cache dir (needed offline)")
     ap.add_argument("--boltz-batch", type=int, default=25, help="designs per `boltz predict` call")
@@ -196,6 +251,25 @@ def main():
     (out / "hits.tsv").write_text("\n".join(lines) + "\n")
 
     n_tasks = math.ceil(len(lines) / a.chunk_size)
+
+    auto_msa = a.target_msa == "auto"
+    target_msa = a.target_msa
+    msa_file = ""
+    if auto_msa:
+        first = lines[0].split("\t")[1]
+        tseq, bseq = chain_seq(first, a.target_chain), chain_seq(first, a.binder_chain)
+        if not tseq or not bseq or "X" in tseq + bseq:
+            sys.exit(f"Could not read chains {a.binder_chain}/{a.target_chain} from {first}")
+        (out / "msa").mkdir(exist_ok=True)
+        (out / "msa" / "prep.yaml").write_text(
+            "version: 1\nsequences:\n"
+            f"  - protein:\n      id: {a.target_chain}\n      sequence: {tseq}\n"
+            f"  - protein:\n      id: {a.binder_chain}\n      sequence: {bseq}\n"
+            f"      msa: empty\n      cyclic: true\n")
+        msa_file = out / "msa" / "boltz_results_prep" / "msa" / "prep_0.csv"
+        target_msa = msa_file
+    elif a.target_msa != "empty":
+        target_msa = str(Path(a.target_msa).resolve())
     mem = a.mem or f"{24 * a.workers}G"
     cpus = a.cpus or 4 * a.workers
     m = {
@@ -205,13 +279,15 @@ def main():
         "BINDER_CHAIN": a.binder_chain, "TARGET_CHAIN": a.target_chain,
         "RMSD_CUTOFF": a.rmsd_cutoff, "BOLTZ_BATCH": a.boltz_batch,
         "RECYCLING": a.recycling_steps, "SAMPLING": a.sampling_steps,
-        "TARGET_MSA": a.target_msa, "BOLTZ_CMD": a.boltz_cmd,
+        "TARGET_MSA": target_msa, "AUTO_MSA": 1 if auto_msa else 0, "MSA_FILE": msa_file, "BOLTZ_CMD": a.boltz_cmd,
         "CACHE_ARG": f'--boltz-cache "{a.boltz_cache}"' if a.boltz_cache else "",
         "PRED_DIR_ARG": f'--afcyc-pred-dir "{Path(a.afcyc_pred_dir).resolve()}"' if a.afcyc_pred_dir else "",
         "EXTRA_ARG": f'--extra-args "{a.extra_args}"' if a.extra_args else "",
         "N_TASKS": n_tasks, "MAX_CONC": a.max_concurrent,
     }
     (out / "cboltz_step.slurm").write_text(fill(TEMPLATE, m))
+    if auto_msa:
+        (out / "prep_msa.slurm").write_text(fill(PREP_TEMPLATE, m))
     sub = out / "submit_cboltz.sh"
     sub.write_text(fill(SUBMIT, m))
     sub.chmod(0o755)
@@ -220,6 +296,7 @@ def main():
     print(f"Designs to validate : {len(lines)}  ->  {n_tasks} array tasks (chunk {a.chunk_size})")
     print(f"Workers/task        : {a.workers} (cpus {cpus}, mem {mem}, time {a.time})")
     print(f"Reference pose      : {'AfCycDesign prediction dir' if a.afcyc_pred_dir else 'relaxed input complex'}")
+    print(f"Target MSA          : {'auto (prep job -> ' + str(msa_file) + ')' if auto_msa else target_msa}")
     print(f"Consensus           : binder CA RMSD (target-fitted) < {a.rmsd_cutoff} A")
     print(f"Launch              : bash {sub}      (smoke test: bash {sub} 1-1)")
     print(f"Then                : python {SCRIPT_DIR}/05b_merge_cyclicboltz_csvs.py {out} --expected-tasks {n_tasks}")
