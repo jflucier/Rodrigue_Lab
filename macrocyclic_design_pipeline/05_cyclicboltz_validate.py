@@ -118,6 +118,9 @@ def main():
     ap.add_argument("--sampling-steps", type=int, default=200)
     ap.add_argument("--diffusion-samples", type=int, default=1)
     ap.add_argument("--batch-size", type=int, default=25, help="designs per `boltz predict` call")
+    ap.add_argument("--keep-predictions-dir", default=None,
+                    help="save each Boltz prediction (PDB + confidence JSON) here; designs already "
+                         "saved are re-scored from disk without running Boltz")
     ap.add_argument("--scratch-dir", default=None, help="scratch root (must be visible in the container)")
     ap.add_argument("--extra-args", default="", help="extra flags appended to `boltz predict`")
     a = ap.parse_args()
@@ -154,13 +157,16 @@ def main():
     if not scratch_root or not os.path.isdir(scratch_root) or not os.access(scratch_root, os.W_OK):
         scratch_root = str(Path(a.out_dir) / "tmp")
     os.makedirs(scratch_root, exist_ok=True)
+    keep = Path(a.keep_predictions_dir) if a.keep_predictions_dir else None
+    if keep:
+        keep.mkdir(parents=True, exist_ok=True)
     print(f"[*] scratch: {scratch_root}", flush=True)
     for b0 in range(0, len(jobs), a.batch_size):
         batch = jobs[b0:b0 + a.batch_size]
         tmp = Path(tempfile.mkdtemp(prefix=f"cboltz_{a.task_id}_", dir=scratch_root))
         inp, res = tmp / "inputs", tmp / "res"
         inp.mkdir()
-        rows, meta = {}, {}
+        rows, meta, need = {}, {}, 0
         for design, pdb in batch:
             row = {c: "" for c in COLS}
             row["design"] = design
@@ -174,13 +180,15 @@ def main():
                 if "X" in bseq or "X" in tseq:
                     raise ValueError("non-standard residue in input")
                 row["sequence"] = bseq
-                write_yaml(inp / f"{design}.yaml", bseq, tseq, a.binder_chain,
-                           a.target_chain, a.target_msa)
+                if not (keep and (keep / f"{design}_model_0.pdb").is_file()):
+                    write_yaml(inp / f"{design}.yaml", bseq, tseq, a.binder_chain,
+                               a.target_chain, a.target_msa)
+                    need += 1
                 meta[design] = pdb
             except Exception as e:  # noqa: BLE001
                 row["error"] = f"input: {e}"
 
-        if meta:
+        if need:
             cmd = [a.boltz_cmd, "predict", str(inp), "--out_dir", str(res),
                    "--output_format", "pdb", "--override",
                    "--recycling_steps", str(a.recycling_steps),
@@ -210,10 +218,24 @@ def main():
         for design, pdb in meta.items():
             row = rows[design]
             try:
-                hits = glob.glob(str(res / "**" / "predictions" / design / f"{design}_model_0.pdb"),
-                                 recursive=True)
-                if not hits:
-                    raise FileNotFoundError("no Boltz prediction written")
+                cached = keep / f"{design}_model_0.pdb" if keep else None
+                if cached is not None and cached.is_file():
+                    pred_pdb = str(cached)
+                    cjp = keep / f"confidence_{design}_model_0.json"
+                    conf_json = str(cjp) if cjp.is_file() else None
+                else:
+                    hits = glob.glob(str(res / "**" / "predictions" / design / f"{design}_model_0.pdb"),
+                                     recursive=True)
+                    if not hits:
+                        raise FileNotFoundError("no Boltz prediction written")
+                    cj = glob.glob(str(res / "**" / "predictions" / design / f"confidence_{design}_model_0.json"),
+                                   recursive=True)
+                    pred_pdb, conf_json = hits[0], (cj[0] if cj else None)
+                    if keep:
+                        for src_f in [pred_pdb] + ([conf_json] if conf_json else []):
+                            dst = keep / Path(src_f).name
+                            shutil.copyfile(src_f, str(dst) + ".tmp")
+                            os.replace(str(dst) + ".tmp", dst)
                 ref, src = pdb, "relaxed_input"
                 if a.afcyc_pred_dir:
                     c = sorted(glob.glob(str(Path(a.afcyc_pred_dir) / "**" / f"{design}*.pdb"), recursive=True))
@@ -221,16 +243,14 @@ def main():
                         ref, src = c[0], "afcyc_prediction"
                 row["ref_source"] = src
                 if src == "afcyc_prediction":
-                    rb, rt = compare(hits[0], ref, a.binder_chain, a.target_chain,
+                    rb, rt = compare(pred_pdb, ref, a.binder_chain, a.target_chain,
                                      a.ref_binder_chain, a.ref_target_chain)
                 else:
-                    rb, rt = compare(hits[0], ref, a.binder_chain, a.target_chain)
+                    rb, rt = compare(pred_pdb, ref, a.binder_chain, a.target_chain)
                 row["rmsd_binder"], row["rmsd_target"] = f"{rb:.4f}", f"{rt:.4f}"
                 row["agree"] = rb < a.rmsd_cutoff
-                cj = glob.glob(str(res / "**" / "predictions" / design / f"confidence_{design}_model_0.json"),
-                               recursive=True)
-                if cj:
-                    conf = json.load(open(cj[0]))
+                if conf_json:
+                    conf = json.load(open(conf_json))
                     for k in ("iptm", "ptm", "confidence_score", "complex_plddt", "complex_iplddt"):
                         if k in conf:
                             row[k] = f"{conf[k]:.4f}"

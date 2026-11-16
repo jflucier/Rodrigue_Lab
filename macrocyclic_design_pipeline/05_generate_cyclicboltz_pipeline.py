@@ -69,7 +69,7 @@ run_worker () {  # $1 jobs tsv, $2 task id, $3 log
         --rmsd-cutoff __RMSD_CUTOFF__ --batch-size __BOLTZ_BATCH__ \
         --recycling-steps __RECYCLING__ --sampling-steps __SAMPLING__ \
         --target-msa "__TARGET_MSA__" --boltz-cmd "__BOLTZ_CMD__" \
-        __CACHE_ARG__ __PRED_DIR_ARG__ __REFCHAIN_ARGS__ __EXTRA_ARG__ > "$3" 2>&1
+        __CACHE_ARG__ __PRED_DIR_ARG__ __REFCHAIN_ARGS__ __KEEP_ARG__ __EXTRA_ARG__ > "$3" 2>&1
 }
 
 if [ "${W}" -le 1 ] || [ "${N_JOBS}" -le 1 ]; then
@@ -207,6 +207,9 @@ def main():
                          "Default: <afcyc-out>/predictions if it exists, else the relaxed input complex")
     ap.add_argument("--ref-binder-chain", default=None, help="binder chain ID in the AfCycDesign prediction PDBs")
     ap.add_argument("--ref-target-chain", default=None, help="target chain ID in the AfCycDesign prediction PDBs")
+    ap.add_argument("--no-keep-predictions", action="store_true",
+                    help="do not save Boltz predictions (default: saved to <out-dir>/boltz_predictions, "
+                         "~0.2 MB per design, so scoring changes can be re-run without the GPU)")
     ap.add_argument("--no-mps", action="store_true", help="Do not start CUDA MPS when --workers > 1")
     ap.add_argument("--max-hits", type=int, default=None, help="cap (after sorting by iPAE); use 2-10 for a smoke test")
     ap.add_argument("--sort-by-ipae", action="store_true", default=True)
@@ -311,7 +314,8 @@ def main():
         "TARGET_MSA": target_msa, "AUTO_MSA": 1 if auto_msa else 0, "MSA_FILE": msa_file, "BOLTZ_CMD": a.boltz_cmd,
         "CACHE_ARG": f'--boltz-cache "{a.boltz_cache}"' if a.boltz_cache else "",
         "PRED_DIR_ARG": f'--afcyc-pred-dir "{pred_dir}"' if pred_dir else "",
-        "REFCHAIN_ARGS": ref_args, "USE_MPS": use_mps,
+        "REFCHAIN_ARGS": ref_args,
+        "KEEP_ARG": "" if a.no_keep_predictions else f'--keep-predictions-dir "{out / "boltz_predictions"}"', "USE_MPS": use_mps,
         "EXTRA_ARG": f'--extra-args "{a.extra_args}"' if a.extra_args else "",
         "N_TASKS": n_tasks, "MAX_CONC": a.max_concurrent,
     }
