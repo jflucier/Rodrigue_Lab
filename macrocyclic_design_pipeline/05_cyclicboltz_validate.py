@@ -25,6 +25,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from difflib import SequenceMatcher
 from pathlib import Path
 
 import numpy as np
@@ -65,27 +66,76 @@ def rmsd(A, B):
     return float(np.sqrt(((A - B) ** 2).sum(1).mean()))
 
 
+def _seq(chain):
+    return "".join(x[0] for x in chain)
+
+
+def _rot(a, b):
+    """k such that (b+b)[k:k+n] == a (b rotated), else None."""
+    if len(a) != len(b) or not a:
+        return None
+    k = (b + b).find(a)
+    return k if k >= 0 else None
+
+
+def _sim(a, b):
+    if a == b or _rot(a, b) is not None:
+        return 1.0
+    return SequenceMatcher(None, a, b, autojunk=False).ratio()
+
+
+def _pairs(ps, rs, cyclic, what):
+    """index pairs (i in prediction chain, j in reference chain) matched by sequence."""
+    if ps == rs:
+        return [(i, i) for i in range(len(ps))]
+    if cyclic:
+        k = _rot(ps, rs)
+        if k is not None:
+            return [(i, (i + k) % len(ps)) for i in range(len(ps))]
+    if len(ps) == len(rs):                    # same length, differing residues: positional
+        return [(i, i) for i in range(len(ps))]
+    pairs = []
+    for m in SequenceMatcher(None, ps, rs, autojunk=False).get_matching_blocks():
+        pairs += [(m.a + t, m.b + t) for t in range(m.size)]
+    if len(pairs) < 0.8 * len(ps):
+        raise ValueError(f"{what}: only {len(pairs)}/{len(ps)} residues matched (pred len {len(ps)}, ref len {len(rs)})")
+    return pairs
+
+
 def compare(pred_pdb, ref_pdb, bch, tch, rbch=None, rtch=None):
-    """bch/tch: chain IDs in the Boltz prediction; rbch/rtch: chain IDs in the reference."""
-    auto = rbch is None and rtch is None
-    rbch, rtch = rbch or bch, rtch or tch
+    """bch/tch: chain IDs in the Boltz prediction. The reference chains are identified by
+    sequence unless rbch/rtch are given. Residues are paired by sequence, so swapped chain
+    IDs, extra/missing target residues and rotated cyclic binders are all handled."""
     p, r = read_ca(pred_pdb), read_ca(ref_pdb)
-    # AfCycDesign prediction PDBs often have the chains swapped (target A, binder B):
-    # if lengths only match the other way round, swap automatically.
-    if auto and all(c in p and c in r for c in (bch, tch)) \
-            and len(p[bch]) != len(r[bch]) \
-            and len(p[bch]) == len(r[tch]) and len(p[tch]) == len(r[bch]):
-        rbch, rtch = tch, bch
-    for pc_, rc_ in ((bch, rbch), (tch, rtch)):
-        if pc_ not in p or rc_ not in r:
-            raise ValueError(f"chain missing (pred {sorted(p)} wants {pc_}; ref {sorted(r)} wants {rc_})")
-        if len(p[pc_]) != len(r[rc_]):
-            raise ValueError(f"{len(p[pc_])} CA in prediction chain {pc_} vs {len(r[rc_])} in reference chain {rc_}")
-    xyz = lambda d, c: np.array([a[1] for a in d[c]])
-    Pt, Qt = xyz(p, tch), xyz(r, rtch)
+    for c in (bch, tch):
+        if c not in p:
+            raise ValueError(f"chain {c} missing in prediction {sorted(p)}")
+    pb, pt = _seq(p[bch]), _seq(p[tch])
+    if rbch is None and rtch is None:
+        ids = list(r)
+        if len(ids) < 2:
+            raise ValueError(f"reference has chains {ids}; need binder and target")
+        rbch = max(ids, key=lambda c: _sim(pb, _seq(r[c])))
+        rtch = max((c for c in ids if c != rbch), key=lambda c: _sim(pt, _seq(r[c])))
+    else:
+        rbch, rtch = rbch or bch, rtch or tch
+    for c in (rbch, rtch):
+        if c not in r:
+            raise ValueError(f"chain {c} missing in reference {sorted(r)}")
+    rb_s, rt_s = _seq(r[rbch]), _seq(r[rtch])
+    try:
+        bp = _pairs(pb, rb_s, True, f"binder pred {bch} vs ref {rbch}")
+        tp = _pairs(pt, rt_s, False, f"target pred {tch} vs ref {rtch}")
+    except ValueError as e:
+        raise ValueError(f"{e}; pred chains { {c: len(v) for c, v in p.items()} } "
+                         f"ref chains { {c: len(v) for c, v in r.items()} }")
+    xyz = lambda chain, idx: np.array([chain[i][1] for i in idx])
+    Pt = xyz(p[tch], [i for i, _ in tp])
+    Qt = xyz(r[rtch], [j for _, j in tp])
     R, pc, qc = kabsch(Pt, Qt)               # move prediction onto reference via target
-    Pb = (xyz(p, bch) - pc) @ R.T + qc
-    return rmsd(Pb, xyz(r, rbch)), rmsd((Pt - pc) @ R.T + qc, Qt)
+    Pb = (xyz(p[bch], [i for i, _ in bp]) - pc) @ R.T + qc
+    Qb = xyz(r[rbch], [j for _, j in bp])
+    return rmsd(Pb, Qb), rmsd((Pt - pc) @ R.T + qc, Qt)
 
 
 def write_yaml(path, binder_seq, target_seq, bch, tch, target_msa):
@@ -137,7 +187,7 @@ def main():
         keep = [r for r in old if not r.get("error")]
         if len(keep) != len(old):          # error rows are retried, not skipped
             with open(csv_path, "w", newline="") as fh:
-                wr = csv.DictWriter(fh, fieldnames=COLS, extrasaction="ignore")
+                wr = csv.DictWriter(fh, fieldnames=COLS, extrasaction="ignore", lineterminator="\n")
                 wr.writeheader()
                 wr.writerows(keep)
             print(f"[*] dropped {len(old) - len(keep)} error rows from a previous attempt (will retry)", flush=True)
@@ -147,7 +197,7 @@ def main():
 
     new = not csv_path.exists()
     out = open(csv_path, "a", newline="")
-    w = csv.DictWriter(out, fieldnames=COLS)
+    w = csv.DictWriter(out, fieldnames=COLS, lineterminator="\n")
     if new:
         w.writeheader()
 

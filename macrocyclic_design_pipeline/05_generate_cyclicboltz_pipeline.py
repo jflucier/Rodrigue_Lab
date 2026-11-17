@@ -119,7 +119,7 @@ done
 EXISTING=()
 for f in "${SHARDS[@]}"; do [ -s "${f}" ] && EXISTING+=("${f}"); done
 [ "${#EXISTING[@]}" -eq 0 ] && { echo "[ERROR] no shard CSV written"; exit 1; }
-awk 'FNR==1 && NR!=1 {next} {print}' "${EXISTING[@]}" > "${TASK_CSV}.tmp" && mv "${TASK_CSV}.tmp" "${TASK_CSV}"
+{ echo "__CSV_HEADER__"; cat "${EXISTING[@]}" | tr -d '\r' | grep -v '^design,' || true; } > "${TASK_CSV}.tmp" && mv "${TASK_CSV}.tmp" "${TASK_CSV}"
 echo "[*] merged ${#EXISTING[@]} shard CSV(s) -> ${TASK_CSV} ($(( $(wc -l < "${TASK_CSV}") - 1 )) rows / ${N_JOBS} designs)"
 if [ "${FAIL}" -eq 0 ]; then
     rm -f "${JOBS}"
@@ -314,6 +314,7 @@ def main():
         "TARGET_MSA": target_msa, "AUTO_MSA": 1 if auto_msa else 0, "MSA_FILE": msa_file, "BOLTZ_CMD": a.boltz_cmd,
         "CACHE_ARG": f'--boltz-cache "{a.boltz_cache}"' if a.boltz_cache else "",
         "PRED_DIR_ARG": f'--afcyc-pred-dir "{pred_dir}"' if pred_dir else "",
+        "CSV_HEADER": "design,round,sequence,rmsd_binder,rmsd_target,agree,iptm,ptm,confidence_score,complex_plddt,complex_iplddt,ref_source,error",
         "REFCHAIN_ARGS": ref_args,
         "KEEP_ARG": "" if a.no_keep_predictions else f'--keep-predictions-dir "{out / "boltz_predictions"}"', "USE_MPS": use_mps,
         "EXTRA_ARG": f'--extra-args "{a.extra_args}"' if a.extra_args else "",

@@ -16,6 +16,10 @@ import re
 from pathlib import Path
 
 
+COLS = ["design", "round", "sequence", "rmsd_binder", "rmsd_target", "agree", "iptm", "ptm",
+        "confidence_score", "complex_plddt", "complex_iplddt", "ref_source", "error"]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("out_dir")
@@ -30,15 +34,23 @@ def main():
             continue
         seen.add(int(m.group(1)))
         with open(f, newline="") as fh:
-            rd = csv.DictReader(fh)
-            if not rd.fieldnames:
-                print(f"[WARN] {f}: empty, skipped")
+            allrows = [r for r in csv.reader(fh) if r]
+        if not allrows:
+            print(f"[WARN] {f}: empty, skipped")
+            continue
+        has_hdr = allrows[0][0] == "design"
+        hdr = allrows[0] if has_hdr else COLS
+        if not has_hdr:
+            print(f"[WARN] {f}: no header line, assuming standard columns")
+        if "error" not in hdr:
+            print(f"[WARN] {f}: unexpected header {hdr}, skipped")
+            continue
+        fields = fields or hdr
+        for r in (allrows[1:] if has_hdr else allrows):
+            if r[0] == "design":
                 continue
-            if "error" not in rd.fieldnames or "design" not in rd.fieldnames:
-                print(f"[WARN] {f}: unexpected header {rd.fieldnames}, skipped")
-                continue
-            fields = fields or rd.fieldnames
-            rows += list(rd)
+            r = (r + [""] * len(hdr))[:len(hdr)]
+            rows.append(dict(zip(hdr, r)))
     shards = [f for f in glob.glob(str(out / "logs" / "cboltz_task*.csv"))
               if (re.search(r"cboltz_task(\d+)\.csv$", f) and int(re.search(r"cboltz_task(\d+)\.csv$", f).group(1)) >= 100000)]
     if shards:
