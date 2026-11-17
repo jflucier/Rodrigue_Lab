@@ -153,4 +153,4 @@ export APPTAINER_TMPDIR=/tank/$USER/apptainer_tmp
 export APPTAINER_CACHEDIR=/tank/$USER/apptainer_cache
 mkdir -p "$APPTAINER_TMPDIR" "$APPTAINER_CACHEDIR"
 
-apptainer build foldseek_gh200.sif foldseek_gh200.sif
+apptainer build foldseek_gh200.sif foldseek_gh200.def
