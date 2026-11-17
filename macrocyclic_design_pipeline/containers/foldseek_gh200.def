@@ -1,0 +1,51 @@
+Bootstrap: docker
+From: nvidia/cuda:12.6.3-base-ubuntu24.04
+
+%post
+    export DEBIAN_FRONTEND=noninteractive
+
+    # 1. Install necessary system build tools
+    apt-get update && apt-get install -y \
+        git \
+        cmake \
+        build-essential \
+        python3-pip \
+        python3-dev \
+        kalign \
+        wget \
+        ca-certificates \
+        && rm -rf /var/lib/apt/lists/*
+
+    pip3 install --no-cache-dir --break-system-packages torch torchvision --index-url https://download.pytorch.org/whl/cu126
+
+    cd /opt
+    wget https://mmseqs.com/foldseek/foldseek-linux-gpu-arm64.tar.gz
+    tar -xvzf foldseek-linux-gpu-arm64.tar.gz
+    rm -f foldseek-linux-gpu-arm64.tar.gz
+
+%environment
+    export LC_ALL=C
+    export PATH="/opt/foldseek/bin/:$PATH"
+    export XLA_FLAGS="--xla_gpu_enable_triton_gemm=false"
+    export XLA_CLIENT_MEM_FRACTION=0.95
+
+%runscript
+    exec foldseek "$@"
+
+%test
+    echo "=== Validating Environment & Binaries ==="
+    export PATH="/opt/foldseek/bin:$PATH"
+
+    # Check Foldseek binary and version
+    which foldseek
+    foldseek version
+
+    # Check Kalign installation
+    which kalign
+
+    # Check Python, PyTorch, and CUDA availability (if built with --nv)
+    python3 -c "import torch; print('PyTorch version:', torch.__version__); print('CUDA available:', torch.cuda.is_available())"
+
+    # Run Foldseek built-in test or help check
+    foldseek -h > /dev/null
+    echo "=== All checks passed! ==="
