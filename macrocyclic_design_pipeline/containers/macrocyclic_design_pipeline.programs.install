@@ -77,12 +77,12 @@ python3 /opt/proteinmpnn/protein_mpnn_run.py \
 salloc --partition=gh-bio --account=def-rodrigu1 --time=10:00:00 --gres=gpu:1 --cpus-per-task=16 --mem=100G
 singularity build --fakeroot afcycdesign_gh200.sif afcycdesign_gh200.def
 
+# build chai-1
 salloc --partition=gh-bio --account=def-rodrigu1 --time=10:00:00 --gres=gpu:1 --cpus-per-task=16 --mem=100G
 export APPTAINER_TMPDIR=/tank/$USER/apptainer_tmp
 export APPTAINER_CACHEDIR=/tank/$USER/apptainer_cache
 mkdir -p "$APPTAINER_TMPDIR" "$APPTAINER_CACHEDIR"
-
-apptainer build chai-1_gh200.sif chai-1_gh200.def
+apptainer build --fakeroot chai-1_gh200.sif chai-1_gh200.def
 apptainer test --nv chai-1_gh200.sif
 
 mkdir -p /home/jflucier/programs/Rodrigue_Lab/chai-1_models
@@ -133,7 +133,6 @@ cat << 'EOF' > ${SLURM_TMPDIR}/chai1_test/test.fasta
 ACDEFGHIKLMNPQRSTVWY
 EOF
 
-# 2. Run Chai-1 offline with --nv on your GH200 GPU
 apptainer run --nv \
   --bind /home/jflucier/programs/Rodrigue_Lab/chai-1_models \
   --bind ${SLURM_TMPDIR}/chai1_test \

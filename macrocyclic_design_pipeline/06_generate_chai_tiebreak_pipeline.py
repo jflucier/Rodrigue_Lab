@@ -276,7 +276,7 @@ def main():
 
     n_tasks = math.ceil(len(cands) / a.chunk_size)
     use_mps = 1 if (a.workers > 1 and not a.no_mps) else 0
-    mem = a.mem or f"{48 * a.workers}G"
+    mem = a.mem or f"{40 * a.workers}G"
     cpus = a.cpus or 4 * a.workers
     esm_flag = "--no-use-esm-embeddings" if a.no_esm else ""
     afcyc_pred = Path(a.afcyc_pred_dir).resolve() if a.afcyc_pred_dir else None
