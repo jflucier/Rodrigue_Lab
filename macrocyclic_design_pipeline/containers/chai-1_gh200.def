@@ -14,6 +14,7 @@ From: nvcr.io/nvidia/dgl:24.05-py3
     git clone https://github.com/chaidiscovery/chai-lab.git /opt/chai-lab
     cd /opt/chai-lab
     pip3 install --no-cache-dir .
+    pip3 uninstall -y hypothesis
 
     mkdir -p /home/jflucier/programs/Rodrigue_Lab/chai-1_models
 
